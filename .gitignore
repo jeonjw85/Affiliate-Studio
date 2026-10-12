@@ -7,7 +7,15 @@ dist/
 __pycache__/
 .pytest_cache/
 *.pyc
+# Local agent notes and work records
 .hermes/
+.claude/
+.codex/
+PLAN.md
+VERIFICATION.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 BACKEND_TDD.md
 UI_TDD.md
 FIX_VERIFY.md
