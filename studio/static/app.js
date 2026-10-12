@@ -1,17 +1,29 @@
 'use strict';
-function actionState(draft, dirty, confirmed, busy, hasErrors) {
-  const ready = Boolean(draft) && !dirty && !busy && !hasErrors;
+function actionState(draft, dirty, confirmed, wordpress, busy, hasErrors, locked = false) {
+  const ready = Boolean(draft) && !dirty && !busy && !hasErrors && !locked;
   const approved = ready && draft.status === 'approved';
-  return {approve: ready && Boolean(confirmed) && !approved, download: approved, schedule: approved};
+  return {approve: ready && Boolean(confirmed) && !approved, download: approved, schedule: approved, wordpress: approved && Boolean(wordpress)};
 }
 if (typeof module !== 'undefined') module.exports = {actionState};
 
 if (typeof document !== 'undefined') (() => {
   const $ = id => document.getElementById(id);
-  let state = {products:[], drafts:[], jobs:[], connections:{ai:false}}, detail = null;
+  let state = {products:[], drafts:[], jobs:[], connections:{wordpress:false}}, detail = null;
   let productId = null, productVersion = null, productDirty = false, busy = false, stale = false, aiCheck = null;
   const gates = new WeakMap();
-  const canAI = () => Boolean(detail && !busy && !dirty() && !productDirty && !stale);
+  const activePublication = p => ['sending','future','uncertain'].includes(p.state);
+  const draftLocked = () => Boolean(detail?.publication_lock || detail?.draft.publication_lock || (state.publications || []).some(p => p.draft_id === detail?.draft.id && activePublication(p)));
+  const productLocked = id => id != null && (state.products.some(p => p.id === id && p.publication_lock) || (detail?.product.id === id && draftLocked()) || (state.publications || []).some(p => activePublication(p) && state.drafts.some(d => d.id === p.draft_id && d.product_id === id)));
+  const canAI = () => Boolean(detail && !busy && !dirty() && !productDirty && !stale && !draftLocked());
+  const publicationStates = {sending:'전송 중 · 미확정',future:'예약 확인됨 · 아직 공개 아님',publish:'공개 확인됨',cancelled:'취소 확인됨 · 원격 초안',uncertain:'결과 불명 · 수동 조회 필요'};
+  function safeURL(value, target) { try { const u=new URL(value); if(!['http:','https:'].includes(u.protocol)||u.username||u.password)return null; if(target && u.origin!==new URL(target).origin)return null; return u.href; } catch (_) { return null; } }
+  function adminURL(p) {
+    if (!Number.isSafeInteger(p.remote_id) || p.remote_id <= 0 || typeof p.target !== 'string' || /[\s\\?#]/.test(p.target)) return null;
+    const base = safeURL(p.target); if (!base) return null;
+    const u = new URL(base); u.pathname = u.pathname.replace(/\/+$/, '') + '/wp-admin/post.php';
+    u.search = `post=${p.remote_id}&action=edit`; return u.href;
+  }
+  const targetLabel = () => safeURL(state.connections?.wordpress_url) || '설정된 WordPress (사이트 주소는 서버에서 제공되지 않음 · WP_URL을 직접 확인하세요)';
   const names = ['provider','name','source_url','affiliate_url','price','observed_at','facts','audience','caveats','ownership_confirmed'];
   const field = name => $('product-form').elements.namedItem(name);
   const idPath = id => encodeURIComponent(String(id));
@@ -43,21 +55,28 @@ if (typeof document !== 'undefined') (() => {
   function sync() {
     for (const el of document.querySelectorAll('[data-action]')) el.disabled = busy || !(gates.get(el)?.() ?? true);
     const edited = dirty();
-    const actions = actionState(detail?.draft, edited || stale || productDirty, $('approval-confirm').checked, busy, hasErrors());
-    for (const name of ['approve','download','schedule']) $(name).disabled = !actions[name];
+    const locked = draftLocked();
+    const actions = actionState(detail?.draft, edited || stale || productDirty, $('approval-confirm').checked, state.connections?.wordpress, busy, hasErrors(), locked);
+    for (const name of ['approve','download','schedule','wordpress']) $(name).disabled = !actions[name];
     $('download-text').disabled = !actions.download;
-    $('product-fields').disabled = busy || !state.csrf;
-    $('draft-fields').disabled = busy || !detail || stale;
-    $('save-draft').disabled = busy || !detail || !edited || stale;
-    $('approval-confirm').disabled = busy || !detail || edited || stale || productDirty || hasErrors() || detail?.draft.status === 'approved';
+    $('product-fields').disabled = busy || !state.csrf || productLocked(productId);
+    $('draft-fields').disabled = busy || !detail || locked || stale;
+    $('save-draft').disabled = busy || !detail || !edited || stale || locked;
+    $('approval-confirm').disabled = busy || !detail || edited || stale || productDirty || locked || hasErrors() || detail?.draft.status === 'approved';
     $('run-at').disabled = busy || !actions.schedule;
     $('reload-draft').disabled = busy || !detail;
     $('refresh').disabled = busy; $('refresh-jobs').disabled = busy; $('new-product').disabled = busy;
     $('ai-check').disabled = busy || !state.csrf || !state.connections?.ai;
     $('ai-style').disabled = !canAI(); $('confirmed-send').disabled = !canAI();
     $('ai-generate').disabled = !canAI() || !state.connections?.ai || !aiCheck?.available || !$('confirmed-send').checked;
+    const cancelledVersion = (state.publications || []).some(p => p.draft_id === detail?.draft.id && p.version === detail?.draft.version && p.state === 'cancelled');
+    $('publish-confirm').disabled = !actions.wordpress || cancelledVersion; $('publish-run-at').disabled = !actions.wordpress || cancelledVersion;
+    $('publish-schedule').disabled = !actions.wordpress || cancelledVersion || !$('publish-confirm').checked;
+    $('publish-target').textContent = `대상 사이트: ${targetLabel()} · 콘텐츠: ${detail?.draft.title || '선택 없음'} · 버전 ${detail?.draft.version || '-'}`;
+    $('publish-timezone').textContent = `입력 시간대: ${Intl.DateTimeFormat().resolvedOptions().timeZone} · 확인 창에 현지 시각과 UTC를 함께 표시합니다.`;
     $('ai-status').textContent = !state.connections?.ai ? `로컬 AI 미설정 · 시작하기에서 설정 방법을 확인하세요. ${state.connections?.ai_error || ''}` : aiCheck ? (aiCheck.available ? `연결 확인됨 · ${aiCheck.model || state.connections.ai_model} · ${dateText(aiCheck.checked_at)} (마지막 조회 결과)` : `연결 확인 실패 · ${aiCheck.error || '로컬 서버와 모델을 확인하세요.'}`) : `설정됨 · 연결 미확인 · 모델 ${state.connections.ai_model || '미확인'}`;
-    $('dirty-status').textContent = stale ? '서버 버전 충돌 · 저장본을 다시 불러오세요.' : edited ? '저장되지 않은 수정 · 승인과 내보내기가 잠겼습니다.' : detail ? `저장된 버전 ${detail.draft.version}` : '';
+    $('dirty-status').textContent = locked ? '공개 예약/전송 잠금 · WordPress 관리자에서 예약 관리 후 앱에서 원격 상태 조회로 확인하세요.' : stale ? '서버 버전 충돌 · 저장본을 다시 불러오세요.' : edited ? '저장되지 않은 수정 · 승인과 내보내기가 잠겼습니다.' : detail ? `저장된 버전 ${detail.draft.version}` : '';
+    $('wordpress-note').textContent = state.connections?.wordpress ? 'WordPress 설정됨 · 초안 전송 버튼은 공개하지 않습니다. 실제 공개는 아래 별도 공개 게시 예약으로만 요청합니다.' : 'WordPress 미연결 · 서버 환경 변수 설정이 필요합니다. 시작하기를 확인하세요.';
   }
   async function run(task, success) {
     if (busy) return;
@@ -77,11 +96,11 @@ if (typeof document !== 'undefined') (() => {
     for (const p of state.products) {
       const card=node('article',null,'record'); card.append(node('h3',p.name),node('p',`${p.provider==='toss'?'토스 쇼핑':'쿠팡 파트너스'} · ${p.price == null ? '가격 미입력' : Number(p.price).toLocaleString('ko-KR')+'원'}`,'meta'));
       const actions=node('div',null,'actions');
-      actions.append(button('상품 수정',()=>{if (canLeaveProduct()) fillProduct(p);},'data-edit-product'),button('초안 만들기',()=>{
+      actions.append(button('상품 수정',()=>{if (canLeaveProduct()) fillProduct(p);},'data-edit-product',()=>!productLocked(p.id)),button('초안 만들기',()=>{
         if (productDirty) { message('상품 입력에 저장되지 않은 수정이 있습니다. 먼저 저장하거나 새 상품 버튼으로 취소하세요.',true); return; }
         if (!canLeaveDraft()) return;
         run(async()=>{const d=await api('/api/drafts','POST',{product_id:p.id}); await refreshState(); await loadDraft(d.id); show('content');},'템플릿 초안을 만들었습니다. 사실과 경고를 직접 검토하세요.');
-      },'data-generate')); card.append(actions); list.append(card);
+      },'data-generate',()=>!productLocked(p.id))); card.append(actions); list.append(card);
     }
   }
   function canLeaveDraft() { return !dirty() || window.confirm('저장하지 않은 콘텐츠 수정이 있습니다. 수정 내용을 버리고 계속할까요?'); }
@@ -120,16 +139,17 @@ if (typeof document !== 'undefined') (() => {
     const next=await api('/api/state');
     if (state.connections?.ai_model !== next.connections?.ai_model || state.connections?.ai !== next.connections?.ai) aiCheck=null;
     state=next; state.products ||= []; state.drafts ||= []; state.jobs ||= [];
+    state.publications ||= [];
     if (detail && state.drafts.some(d => d.id === detail.draft.id && d.version !== detail.draft.version)) stale = true;
     if (detail) {
       const latest=await api(`/api/drafts/${idPath(detail.draft.id)}`);
       if(latest.draft.version !== detail.draft.version) stale=true;
-      detail.checks=latest.checks;
+      detail.publication_lock=latest.publication_lock; detail.checks=latest.checks;
       if(!stale) { detail.draft.status=latest.draft.status; detail.candidates=latest.candidates; }
       renderCandidates(); renderReview();
     }
     $('connection-status').textContent=`서버 연결됨 · 상품 ${state.products.length} · 콘텐츠 ${state.drafts.length}`;
-    renderProducts();renderDrafts();renderJobs();sync();
+    renderProducts();renderDrafts();renderJobs();renderPublications();sync();
   }
   async function loadDraft(id) {
     const next=await api(`/api/drafts/${idPath(id)}`);
@@ -141,7 +161,7 @@ if (typeof document !== 'undefined') (() => {
     const p=detail.product;
     for (const [key,value] of [['상품',p.name],['가격',p.price == null?'미확인':Number(p.price).toLocaleString('ko-KR')+'원'],['정보 확인 시각',dateText(p.observed_at)],['사실',(p.facts||[]).join('\n')],['출처',p.source_url],['제휴 URL',p.affiliate_url],['주의사항',p.caveats||'입력 없음']]) $('product-facts').append(node('dt',key),node('dd',value));
     renderReview();
-    $('confirmed-send').checked=false; renderCandidates(); renderDrafts();sync();
+    $('confirmed-send').checked=false; $('publish-confirm').checked=false; renderCandidates(); renderDrafts();sync();
   }
   function renderReview() {
     $('draft-status').textContent=(stale ? '이전 저장본 · ' : '')+(states[detail.draft.status]||detail.draft.status);
@@ -149,6 +169,35 @@ if (typeof document !== 'undefined') (() => {
     $('checks').replaceChildren();
     for(const [type,label] of [['errors','오류'],['warnings','주의']]) for(const check of detail.checks?.[type]||[]) $('checks').append(node('p',`${label}: ${typeof check==='string'?check:JSON.stringify(check)}`,type==='errors'?'check-error':'check-warning'));
     if(!hasErrors()) $('checks').append(node('p','차단 오류 없음 · 자동 검사는 사실 확인과 정책 검토를 대신하지 않습니다.','muted'));
+  }
+  function renderPublications() {
+    $('publication-list').replaceChildren();
+    if (!state.publications.length) $('publication-list').append(node('p','등록된 WordPress 공개 예약이 없습니다. 콘텐츠에서 승인·초안 전송 후 공개 예약하세요.','card empty'));
+    for (const p of state.publications) {
+      const card=node('article',null,'card job-card'), info=node('div'), actions=node('div',null,'actions');
+      const title=state.drafts.find(d=>d.id===p.draft_id)?.title || `콘텐츠 #${p.draft_id}`;
+      info.append(node('h3',title),node('span',publicationStates[p.state] || '알 수 없는 상태 · 확인 필요',`badge ${Object.hasOwn(publicationStates,p.state)?p.state:'uncertain'}`),node('p',`사이트: ${safeURL(p.target) || '주소 확인 필요'} · 버전 ${p.version}`,'meta'),node('p',`예정: ${dateText(p.run_at)} · 마지막 원격 조회: ${dateText(p.checked_at)}`,'meta'));
+      if(p.state==='future' && new Date(p.run_at).getTime() < Date.now())info.append(node('p','예정 시각이 지났지만 아직 공개 확인되지 않았습니다. 원격 상태를 조회하세요.','check-warning'));
+      if(p.error)info.append(node('p',p.error,'job-error'));
+      const href=p.checked_at && ['future','publish','cancelled'].includes(p.state) && safeURL(p.target) && safeURL(p.remote_url,p.target);
+      if(href){const link=node('a','확인된 원격 글 열기');link.href=href;link.target='_blank';link.rel='noopener noreferrer';actions.append(link);}
+      actions.append(button('원격 상태 조회',()=>run(async()=>{const result=await publicationRequest(p,'refresh',{});if(!['future','publish','cancelled'].includes(result.state))throw new Error(result.error || '원격 결과 미확정 · 자동 재시도하지 않습니다.');return result;},result=>`원격 조회: ${publicationStates[result.state]} · ${dateText(result.checked_at)}`),'data-refresh-publication'));
+      if (['future','uncertain'].includes(p.state)) {
+        const admin = adminURL(p);
+        if (admin) { const link=node('a','WordPress에서 예약 관리'); link.href=admin; link.target='_blank'; link.rel='noopener noreferrer'; link.setAttribute('data-manage-publication',''); actions.append(link); }
+        info.append(node('p','앱 직접 취소는 지원하지 않습니다. WordPress 관리자에서 현재 상태를 확인하고 예약 글을 초안으로 돌린 뒤 이 앱의 원격 상태 조회를 누르세요. 이미 공개된 글은 앱에서 취소·비공개 전환하지 않습니다.','field-help'));
+      }
+      if (p.state === 'cancelled') info.append(node('p','취소된 동일 버전은 재예약 불가: 취소 확인 후 본문 또는 제목 수정·저장 → 재승인 → 새 원격 초안 전송 → 새 예약 순서로 진행하세요.','field-help'));
+      card.append(info,actions);$('publication-list').append(card);
+    }
+  }
+  async function publicationRequest(p,action,data) {
+    const result=await api(`/api/publications/${idPath(p.id)}/${action}`,'POST',data);
+    rememberPublication(result); await refreshState(); return result;
+  }
+  function rememberPublication(p) {
+    state.publications=[...(state.publications || []).filter(old=>old.id!==p.id),p];
+    renderPublications();sync();
   }
   function renderCandidates() {
     $('candidate-list').replaceChildren();
@@ -177,7 +226,7 @@ if (typeof document !== 'undefined') (() => {
   $('product-form').addEventListener('input',()=>{productDirty=true;sync();});
   $('product-form').addEventListener('change',()=>{productDirty=true;sync();});
   $('product-form').addEventListener('submit',event=>{
-    event.preventDefault(); if(busy || !$('product-form').reportValidity())return;
+    event.preventDefault(); if(busy || productLocked(productId) || !$('product-form').reportValidity())return;
     if(detail && !canLeaveDraft())return;
     run(async()=>{
       const data={};for(const name of names) data[name]=field(name).value.trim();
@@ -190,12 +239,12 @@ if (typeof document !== 'undefined') (() => {
       fillProduct(p);await refreshDetailAndState();
     },'상품을 저장했습니다. 상품 목록에서 초안을 만들 수 있습니다.');
   });
-  const onEdit=()=>{$('approval-confirm').checked=false;$('confirmed-send').checked=false;sync();};
+  const onEdit=()=>{$('approval-confirm').checked=false;$('publish-confirm').checked=false;$('confirmed-send').checked=false;sync();};
   $('draft-title').addEventListener('input',onEdit);$('draft-body').addEventListener('input',onEdit);
   $('approval-confirm').addEventListener('change',sync);
   $('reload-draft').addEventListener('click',()=>{if(canLeaveDraft())run(()=>loadDraft(detail.draft.id),'서버 저장본을 불러왔습니다. 다시 검토하세요.');});
   $('draft-form').addEventListener('submit',event=>{
-    event.preventDefault();if(!detail||!dirty()||stale||busy||!$('draft-form').reportValidity())return;
+    event.preventDefault();if(!detail||!dirty()||stale||draftLocked()||busy||!$('draft-form').reportValidity())return;
     run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}`,'PUT',{version:detail.draft.version,title:$('draft-title').value,body:$('draft-body').value});await refreshDetailAndState();},'수정본을 저장했습니다. 기존 승인이 해제되었으므로 다시 확인하세요.');
   });
   $('approve').addEventListener('click',()=>{if($('approve').disabled)return;run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}/approve`,'POST',{version:detail.draft.version,confirmed:true});await refreshDetailAndState();},'현재 저장본을 승인했습니다.');});
@@ -205,7 +254,24 @@ if (typeof document !== 'undefined') (() => {
     event.preventDefault();if($('schedule').disabled||!$('schedule-form').reportValidity())return;
     run(async()=>{const run_at=iso($('run-at').value);if(new Date(run_at).getTime()<=Date.now())throw new Error('예약 시각은 현재보다 이후여야 합니다.');await api(`/api/drafts/${idPath(detail.draft.id)}/schedule`,'POST',{version:detail.draft.version,run_at});await refreshDetailAndState();show('jobs');},'로컬 패키지 생성을 예약했습니다. 외부에 게시되지 않습니다.');
   });
+  $('wordpress').addEventListener('click',()=>{
+    if($('wordpress').disabled || !window.confirm('승인된 콘텐츠를 외부 WordPress 서버로 전송합니다. 원격 초안만 만들며 공개 게시하지 않습니다. 계속할까요?'))return;
+    run(async()=>{const result=await api(`/api/drafts/${idPath(detail.draft.id)}/wordpress`,'POST',{version:detail.draft.version,confirmed:true});if(result.state!=='completed')throw new Error(result.error||'전송 결과 미확정: WordPress 관리자에서 확인하세요. 자동으로 재전송하지 않습니다.');await refreshDetailAndState();},'WordPress 원격 초안을 확인했습니다. 공개 게시하지 않았습니다. WordPress에서 결과를 확인하세요.');
+  });
   $('confirmed-send').addEventListener('change',sync);
+  $('publish-confirm').addEventListener('change',sync);
+  $('publish-run-at').addEventListener('input',()=>{$('publish-confirm').checked=false;sync();});
+  $('publish-form').addEventListener('submit',event=>{
+    event.preventDefault();if($('publish-schedule').disabled || !$('publish-form').reportValidity())return;
+    let run_at;
+    try {
+      run_at=iso($('publish-run-at').value);const due=new Date(run_at).getTime();
+      if(due < Date.now()+5*60000 || due > Date.now()+30*86400000)throw new Error('공개 예약은 현재부터 5분 이후, 30일 이내여야 합니다.');
+      if(detail.product.price != null && due > new Date(detail.product.observed_at).getTime()+86400000)throw new Error('가격 정보 확인 시각부터 24시간 이내로 예약하거나 상품 가격 정보를 다시 검토하세요.');
+    }catch(error){message(error.message,true);return;}
+    if(!window.confirm(`실제 WordPress 공개 게시를 예약합니다.\n콘텐츠: ${detail.draft.title}\n승인 버전: ${detail.draft.version}\n대상: ${targetLabel()}\n현지: ${dateText(run_at)} (${Intl.DateTimeFormat().resolvedOptions().timeZone})\nUTC: ${run_at}\n이 앱을 종료해도 예약이 유지됩니다. 계속할까요?`))return;
+    run(async()=>{const result=await api(`/api/drafts/${idPath(detail.draft.id)}/publish-schedule`,'POST',{version:detail.draft.version,run_at,confirmed_publish:true});rememberPublication(result);$('publish-confirm').checked=false;await refreshState();show('jobs');if(!['future','publish'].includes(result.state))throw new Error(result.error || '공개 예약 결과 불명 · 자동 재시도하지 말고 원격 상태를 조회하세요.');return result;},result=>`${publicationStates[result.state]} · WordPress 원격 조회로 상태를 확인했습니다. 정시 발행은 WordPress 운영 상태에 달려 있습니다.`);
+  });
   $('ai-check').addEventListener('click',()=>{if($('ai-check').disabled)return;run(async()=>{aiCheck={available:false,error:'연결을 확인하지 못했습니다. 서버 상태를 확인하고 다시 조회하세요.'};aiCheck={...await api('/api/ai/check','POST',{}),checked_at:new Date().toISOString()};if(!aiCheck.available)throw new Error(aiCheck.error || '로컬 AI 연결을 확인하지 못했습니다.');},'로컬 AI 모델 연결을 확인했습니다. 생성은 별도 동의 후 실행됩니다.');});
   $('ai-generate').addEventListener('click',()=>{if($('ai-generate').disabled)return;run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}/ai`,'POST',{version:detail.draft.version,style:$('ai-style').value,confirmed_send:true});await refreshDetailAndState();},'후보를 만들었습니다. 저장본은 유지됩니다. 비교 후 직접 적용하세요.');});
   window.addEventListener('beforeunload',event=>{if(dirty()||productDirty){event.preventDefault();event.returnValue='';}});

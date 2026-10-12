@@ -26,6 +26,8 @@ def test_http_approval_download_and_scheduler(tmp_path):
             time.sleep(.1)
         assert jobs[0]['state']=='completed'
         assert c.get(f"/api/jobs/{j['id']}/download").status_code==200
+        wp=c.post(f"/api/drafts/{d['id']}/wordpress",json={'version':1,'confirmed':True},headers=headers)
+        assert wp.status_code==400
 
 def test_http_download_requires_reviewed_revision_and_conflicts_are_409(tmp_path):
     from studio.app import create_app

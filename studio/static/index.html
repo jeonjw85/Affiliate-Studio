@@ -71,14 +71,28 @@
         <section class="card ai-card" aria-labelledby="ai-heading">
           <div class="card-heading"><h2 id="ai-heading">로컬 AI 후보 비교</h2><button id="ai-check" type="button">AI 연결 확인</button></div>
           <p id="ai-status" role="status">로컬 AI 설정 확인 중</p>
-          <p class="field-help">저장된 상품 사실과 초안을 로컬 OpenAI 호환 서버로 보냅니다. 제휴 URL은 보내지 않습니다. 후보는 자동 적용·승인되지 않으며 근거 번호는 사실 검증의 증거가 아닙니다.</p>
+          <p class="field-help">저장된 상품 사실과 초안을 로컬 OpenAI 호환 서버로 보냅니다. 제휴 URL과 WordPress 비밀번호는 보내지 않습니다. 후보는 자동 적용·승인되지 않으며 근거 번호는 사실 검증의 증거가 아닙니다.</p>
           <div class="two-fields"><label>작성 유형<select id="ai-style"><option value="guide">구매 가이드</option><option value="concise">핵심 조건 요약</option></select></label><div><label class="check"><input id="confirmed-send" name="confirmed_send" type="checkbox"><span>현재 저장본을 설정된 로컬 AI에 보내는 데 동의합니다.</span></label><button id="ai-generate" type="button" disabled>AI 후보 생성</button></div></div>
           <div id="candidate-list" class="candidate-list" aria-live="polite"></div>
         </section>
         <section class="card review-card"><h2>내보내기 전 확인</h2><div id="checks" aria-live="polite"></div>
           <label class="check"><input id="approval-confirm" type="checkbox"><span>현재 저장본의 상품 정보, 제휴 고지, 표현과 정책상 주의사항을 직접 확인했습니다.</span></label>
-          <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button><button id="download" type="button" disabled>승인본 ZIP 다운로드</button><button id="download-text" type="button" disabled>승인본문 TXT 가져오기</button></div>
+          <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button><button id="download" type="button" disabled>승인본 ZIP 다운로드</button><button id="download-text" type="button" disabled>승인본문 TXT 가져오기</button><button id="wordpress" type="button" disabled>WordPress 초안으로 전송</button></div>
           <p class="field-help">TXT에는 광고 고지·출처·제휴 링크가 함께 들어갑니다. 허용된 게시 채널에 직접 붙여 넣고, 그 채널의 고지 표시와 링크 정책을 다시 확인하세요. 자동으로 게시하지 않습니다.</p>
+          <p id="wordpress-note" class="field-help">WordPress 연결 상태 확인 중입니다.</p>
+          <div class="publication-panel">
+            <h3>WordPress 공개 게시 예약</h3>
+            <p>먼저 위 버튼으로 <strong>같은 승인 버전의 원격 초안</strong>을 전송하세요. 서버가 사이트·버전·본문 일치를 재검증한 뒤 해당 글만 공개 예약으로 바꿉니다.</p>
+            <p id="publish-target" class="subtle-note"></p>
+            <form id="publish-form">
+              <label>공개 예정 시각<input id="publish-run-at" type="datetime-local" required></label>
+              <p id="publish-timezone" class="field-help"></p>
+              <label class="check"><input id="publish-confirm" type="checkbox"><span>이 승인본이 표시된 WordPress 사이트에 공개되도록 예약하는 데 동의합니다. 로컬 ZIP 예약과 다릅니다.</span></label>
+              <button id="publish-schedule" type="submit" class="primary" disabled>WordPress 공개 게시 예약</button>
+            </form>
+            <p class="field-help">현재부터 5분 이후, 30일 이내. 가격이 있으면 정보 확인 시각부터 24시간 이내만 예약할 수 있습니다. 앱을 종료해도 원격 예약은 유지되며 정시 발행은 WordPress cron·호스팅 상태에 달려 있습니다.</p>
+            <p class="field-help">취소된 동일 버전은 재예약할 수 없습니다. 취소 확인 후 본문 또는 제목 수정·저장 → 재승인 → 새 원격 초안 전송 → 새 예약 순서로 진행하세요.</p>
+          </div>
           <form id="schedule-form" class="schedule-form"><label>패키지 생성 예약 시각<input id="run-at" type="datetime-local" required></label><button id="schedule" type="submit" disabled>로컬 패키지 예약</button></form>
           <p class="field-help">예약은 자동 게시가 아닙니다. 서버가 실행 중일 때 승인본의 로컬 ZIP 패키지를 생성합니다.</p>
         </section>
@@ -86,7 +100,10 @@
     </section>
 
     <section id="view-jobs" aria-labelledby="jobs-heading" hidden>
-      <div class="page-heading"><div><p class="eyebrow">03 / 운영</p><h1 id="jobs-heading">예약과 실행 기록</h1><p>로컬 ZIP 생성 예약과 실행 기록을 확인하세요.</p></div><button id="refresh-jobs" type="button">예약 상태 새로고침</button></div>
+      <div class="page-heading"><div><p class="eyebrow">03 / 운영</p><h1 id="jobs-heading">예약과 실행 기록</h1><p>WordPress 공개 예약과 로컬 ZIP 생성 기록을 구분해 확인하세요.</p></div><button id="refresh-jobs" type="button">예약 상태 새로고침</button></div>
+      <h2>WordPress 공개 게시</h2>
+      <p class="subtle-note">아래는 마지막 조회 결과이며 실시간 상태가 아닙니다. ‘원격 상태 조회’는 WordPress에 읽기 요청만 보냅니다. 예정 시각이 지나도 공개 확인 전에는 게시 완료가 아닙니다. 앱 직접 취소는 지원하지 않습니다. ‘WordPress에서 예약 관리’로 관리자 화면을 열어 현재 상태를 확인하고 예약 글을 초안으로 돌린 뒤, 이 앱의 ‘원격 상태 조회’로 취소와 잠금 해제를 확인하세요. 결과 불명은 자동 재시도하지 않으며 이미 공개된 글은 앱에서 취소·삭제·비공개 전환할 수 없습니다.</p>
+      <div id="publication-list" class="job-list" aria-live="polite"></div>
       <h2>로컬 ZIP 생성 기록 · 외부 게시 아님</h2>
       <div class="subtle-note" id="worker-status">작업 실행기 상태를 확인하는 중입니다.</div>
       <div id="job-list" class="job-list"></div>
@@ -98,10 +115,11 @@
       <div class="guide-grid">
         <article class="card"><span class="step">01</span><h2>상품 정보와 링크 입력</h2><p>쿠팡 파트너스 또는 토스에서 직접 발급한 본인의 제휴 URL을 입력하세요. 원본 URL, 확인한 사실, 가격 확인 시각을 기록합니다.</p><p>상품 수집, 제휴 링크 발급, 매출·수익 추적은 제공하지 않습니다. 토스 제휴 정책은 확인되지 않았으므로 직접 검토해야 합니다.</p></article>
         <article class="card"><span class="step">02</span><h2>템플릿 또는 로컬 AI 후보</h2><p>초안 만들기는 템플릿 생성입니다. 선택적으로 로컬 OpenAI 호환 서버를 실행하고 앱 서버 환경 변수 <code>AI_BASE_URL</code>, <code>AI_MODEL</code>을 지정하세요. 루프백 로컬 서버만 지원하며 유료 API나 API 키는 필요하지 않습니다.</p><p>설정됨은 연결 성공이 아닙니다. 콘텐츠에서 ‘AI 연결 확인’ 후 전송 범위에 동의하고 후보를 만드세요. 두 작성 유형의 후보를 원문과 비교한 뒤 적용하고 직접 검토·승인합니다. 가격·출처·고지는 서버 미리보기에 별도 포함됩니다.</p></article>
-        <article class="card"><span class="step">03</span><h2>승인 후 ZIP 내보내기</h2><p>로컬 ZIP 생성 예약은 공개 게시가 아닙니다. 앱 서버가 실행 중일 때만 패키지를 만듭니다.</p><p>예약 탭에서 실행 결과를 확인하고, 필요하면 대기 중인 예약을 취소하세요. 승인본 ZIP과 광고 고지·출처·제휴 링크를 포함한 TXT를 내려받을 수 있습니다.</p></article>
+        <article class="card"><span class="step">03</span><h2>승인 후 ZIP 또는 공개 예약</h2><p>로컬 ZIP 생성 예약은 공개 게시가 아닙니다. 앱 서버가 실행 중일 때만 패키지를 만듭니다. WordPress 공개 예약은 같은 승인본의 원격 초안 전송 후 별도의 공개 동의와 시각 확인이 필요합니다.</p><p>예약 탭에서 마지막 조회 시각과 결과를 확인하세요. 공개 예약·전송 중·결과 불명 상태의 글과 관련 상품은 수정이 잠깁니다. 취소는 WordPress 관리자에서 예약 글을 초안으로 되돌린 뒤 앱의 원격 상태 조회로 확인하세요. 앱에서 직접 취소하지 않습니다.</p></article>
+        <article class="card"><span class="step">선택 사항</span><h2>WordPress 연결</h2><p>서버 환경 변수 <code>WP_URL</code>, <code>WP_USERNAME</code>, <code>WP_APP_PASSWORD</code>로 연결합니다. 애플리케이션 비밀번호는 이 화면에 입력하거나 표시하지 않습니다.</p><p>‘초안으로 전송’은 공개하지 않습니다. ‘공개 게시 예약’은 실제 외부 공개를 예약합니다. 원격 예약은 PC 종료 후에도 유지되며 WordPress cron에 따라 지연될 수 있습니다. 연결하지 않아도 상품·콘텐츠·ZIP 기능을 사용할 수 있습니다.</p></article>
       </div>
     </section>
-    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 후보 검토 → 직접 승인 → 로컬 ZIP 내보내기</span></footer>
+    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 후보 검토 → 직접 승인 → ZIP 또는 WordPress 공개 예약</span></footer>
   </main>
 </body>
 </html>

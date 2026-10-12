@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from .core import Store, VersionConflict
+from .wordpress import WordPress
 from .ai import LocalAI
 
 
@@ -20,6 +21,16 @@ def create_app(data_dir=None):
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     store = Store(data / 'studio.db')
     token = secrets.token_urlsafe(32)
+    wp = None
+    wp_error = ''
+    env = [os.environ.get(k, '') for k in ('WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD')]
+    if all(env):
+        try:
+            wp = WordPress(*env)
+        except ValueError:
+            wp_error = 'WordPress 서버 환경변수 형식을 확인하세요.'
+    elif any(env):
+        wp_error = 'WordPress 환경변수 세 개를 모두 설정해야 합니다.'
     task = None
     worker_error = ''
     ai = None
@@ -94,7 +105,8 @@ def create_app(data_dir=None):
 
     @app.get('/api/state')
     def state():
-        return dict(store.state(), csrf=token, connections={'ai': ai is not None, 'ai_model': ai_model, 'ai_error': ai_error}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
+        return dict(store.state(), csrf=token, connections={'wordpress':wp is not None, 'wordpress_error':wp_error, 'wordpress_url': wp.url if wp else '',
+                    'ai': ai is not None, 'ai_model': ai_model, 'ai_error': ai_error}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
 
     @app.post('/api/ai/check')
     def ai_check(body: dict):
@@ -108,8 +120,17 @@ def create_app(data_dir=None):
     def apply_ai(id: str, candidate_id: str, body: dict):
         return store.apply_candidate(id, candidate_id, body.get('version'))
 
+    @app.post('/api/drafts/{id}/publish-schedule')
+    def publish_schedule(id: str, body: dict):
+        return store.publish_schedule(id, body.get('version'), body.get('run_at'), body.get('confirmed_publish'), wp)
 
+    @app.post('/api/publications/{id}/refresh')
+    def refresh_publication(id: str, body: dict):
+        return store.refresh_publication(id, wp)
 
+    @app.post('/api/publications/{id}/cancel')
+    def cancel_publication(id: str, body: dict):
+        return store.cancel_publication(id, body.get('confirmed_cancel'), wp)
 
     @app.post('/api/products')
     def add_product(body: dict):
@@ -167,6 +188,9 @@ def create_app(data_dir=None):
             raise ValueError('생성한 파일이 삭제되었거나 이동됐습니다.')
         return FileResponse(path, media_type='application/zip', filename=j['artifact'])
 
+    @app.post('/api/drafts/{id}/wordpress')
+    def wordpress(id: str, body: dict):
+        return store.wordpress_draft(id, body.get('version'), body.get('confirmed'), wp)
 
     @app.get('/')
     def index():
