@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>제휴 콘텐츠 작업대</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a href="#main" class="skip-link">본문으로 건너뛰기</a>
+  <header class="topbar">
+    <div class="brand">제휴 콘텐츠 <span>작업대</span></div>
+    <nav aria-label="주 메뉴">
+      <button type="button" data-view="products" aria-current="page">상품</button>
+      <button type="button" data-view="content">콘텐츠</button>
+      <button type="button" data-view="guide">시작하기</button>
+    </nav>
+    <span class="local-label">로컬 작업 공간</span>
+  </header>
+  <main id="main" tabindex="-1">
+    <div class="workspace-line"><span id="connection-status">서버 연결 확인 중</span><button id="refresh" class="small" type="button">상태 새로고침</button></div>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <noscript><div class="notice">이 작업대는 JavaScript가 필요합니다.</div></noscript>
+
+    <section id="view-products" aria-labelledby="products-heading">
+      <div class="page-heading"><div><p class="eyebrow">01 / 상품 정보</p><h1 id="products-heading">확인한 사실부터 시작하세요.</h1><p>직접 발급한 제휴 링크와 확인한 상품 정보로 콘텐츠를 준비합니다.</p></div></div>
+      <div class="product-layout">
+        <section class="card"><div class="card-heading"><h2>등록 상품 <span id="product-count" class="count">0</span></h2><button id="new-product" type="button" class="small">새 상품</button></div><div id="product-list" class="record-list"><p class="empty">상품을 불러오는 중입니다.</p></div></section>
+        <section class="card"><div class="card-heading"><h2 id="product-form-title">상품 등록</h2><span class="muted">* 필수 항목</span></div>
+          <form id="product-form"><fieldset id="product-fields" disabled>
+            <div class="two-fields"><label>제휴 서비스 *<select name="provider" required><option value="coupang">쿠팡 파트너스</option><option value="toss">토스 쇼핑</option></select></label><label>상품명 *<input name="name" required maxlength="160" autocomplete="off"></label></div>
+            <label>원본 상품 URL *<input name="source_url" type="url" required placeholder="https://" autocomplete="off"></label>
+            <label>직접 발급한 제휴 URL *<input name="affiliate_url" type="url" required placeholder="https://" autocomplete="off"></label>
+            <p class="field-help">링크를 자동 생성하거나 변환하지 않습니다. 서비스에서 본인에게 발급한 링크를 붙여 넣으세요.</p>
+            <div class="two-fields"><label>확인한 가격 (원)<input name="price" type="number" min="1" step="1" placeholder="미확인 시 비워두기"></label><label>정보 확인 시각 *<input name="observed_at" type="datetime-local" required></label></div>
+            <p class="field-help">시각은 이 기기의 현지 시간으로 입력하며, 서버에는 시간대가 포함된 값으로 저장합니다.</p>
+            <label>확인한 사실 *<textarea name="facts" rows="4" required placeholder="확인한 사실을 한 줄에 하나씩 입력하세요."></textarea></label>
+            <label>대상 독자 *<input name="audience" required maxlength="500" placeholder="어떤 독자에게 필요한 상품인가요?"></label>
+            <label>주의사항 *<textarea name="caveats" required maxlength="1000" rows="2" placeholder="확인하지 못한 점, 제한 사항, 가격 변동 가능성 등"></textarea></label>
+            <div class="subtle-note">토스 쇼핑의 제휴 정책은 확인되지 않았습니다. 이용 자격과 링크 사용 정책을 직접 검토한 뒤 사용하세요.</div>
+            <label class="check"><input name="ownership_confirmed" type="checkbox" required><span>이 제휴 링크가 본인에게 발급되었고 사용 권한이 있음을 확인했습니다. *</span></label>
+            <div class="form-footer"><span id="product-edit-note" class="muted">저장 후 템플릿 초안을 만들 수 있습니다.</span><button type="submit" class="primary" id="save-product">상품 저장</button></div>
+          </fieldset></form>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-content" aria-labelledby="content-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">02 / 검토와 승인</p><h1 id="content-heading">초안을 읽고, 직접 승인하세요.</h1><p>템플릿에서 시작하세요. 사실과 표현을 직접 검토해야 합니다.</p></div></div>
+      <section class="card draft-picker"><h2>저장된 콘텐츠 <span id="draft-count" class="count">0</span></h2><div id="draft-list" class="draft-list"></div></section>
+      <div id="content-empty" class="empty card"><h2>아직 선택한 콘텐츠가 없습니다.</h2><p>상품 탭에서 상품을 저장한 뒤 ‘초안 만들기’를 누르세요.</p><button type="button" data-view="products">상품으로 이동</button></div>
+      <div id="draft-workspace" hidden>
+        <div class="editor-status"><div><span id="draft-status" class="badge"></span><span id="dirty-status" class="muted"></span></div><button id="reload-draft" type="button" class="small">서버 저장본 다시 불러오기</button></div>
+        <div class="editor-grid">
+          <section class="card"><div class="card-heading"><h2>콘텐츠 편집</h2><span class="muted">일반 텍스트</span></div><form id="draft-form"><fieldset id="draft-fields">
+            <label>제목<input id="draft-title" required maxlength="200"></label>
+            <label>본문<textarea id="draft-body" rows="17" required></textarea></label>
+            <p class="field-help">가격·출처·제휴 고지는 편집 본문 밖에 유지됩니다. 상품 또는 본문 수정 시 기존 승인이 해제됩니다.</p>
+            <div class="form-footer"><span class="muted">수정 후 반드시 저장하세요.</span><button type="submit" id="save-draft" class="primary">수정 저장</button></div>
+          </fieldset></form></section>
+          <section class="card"><div class="card-heading"><h2>저장본 미리보기</h2><span class="muted">읽기 전용</span></div>
+            <p class="preview-note">저장된 서버 버전 기준입니다. 편집 중인 내용은 저장 후 반영됩니다.</p>
+            <iframe id="preview-frame" title="저장된 콘텐츠 HTML 미리보기" sandbox="" referrerpolicy="no-referrer"></iframe>
+            <details><summary>상품 사실·출처 확인</summary><dl id="product-facts" class="facts"></dl></details>
+            <details><summary>텍스트 미리보기</summary><h3>일반 텍스트</h3><pre id="preview-text"></pre><h3>텔레그램용 텍스트</h3><pre id="preview-telegram"></pre><h3>추가 작성용 프롬프트</h3><pre id="preview-prompt"></pre></details>
+          </section>
+        </div>
+        <section class="card review-card"><h2>직접 검토 후 승인</h2><div id="checks" aria-live="polite"></div>
+          <label class="check"><input id="approval-confirm" type="checkbox"><span>현재 저장본의 상품 정보, 제휴 고지, 표현과 정책상 주의사항을 직접 확인했습니다.</span></label>
+          <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button></div>
+        </section>
+      </div>
+    </section>
+
+
+
+    <section id="view-guide" aria-labelledby="guide-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">시작하기</p><h1 id="guide-heading">작게 만들고, 확인한 뒤 전달하세요.</h1><p>이 작업대가 하는 일과 하지 않는 일입니다.</p></div></div>
+      <div class="guide-grid">
+        <article class="card"><span class="step">01</span><h2>상품 정보와 링크 입력</h2><p>쿠팡 파트너스 또는 토스에서 직접 발급한 본인의 제휴 URL을 입력하세요. 원본 URL, 확인한 사실, 가격 확인 시각을 기록합니다.</p><p>상품 수집, 제휴 링크 발급, 매출·수익 추적은 제공하지 않습니다. 토스 제휴 정책은 확인되지 않았으므로 직접 검토해야 합니다.</p></article>
+        <article class="card"><span class="step">02</span><h2>템플릿 초안 검토</h2><p>초안 만들기는 템플릿 생성입니다. 확인한 상품 사실로 초안을 만들고 직접 편집·검토·승인하세요. 가격·출처·고지는 서버 미리보기에 별도 포함됩니다.</p></article>
+      </div>
+    </section>
+    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 직접 승인</span></footer>
+  </main>
+</body>
+</html>
