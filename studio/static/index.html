@@ -6,7 +6,9 @@
   <meta name="color-scheme" content="light">
   <title>제휴 콘텐츠 작업대</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/measurements.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/measurements.js" defer></script>
 </head>
 <body>
   <a href="#main" class="skip-link">본문으로 건너뛰기</a>
@@ -16,6 +18,7 @@
       <button type="button" data-view="products" aria-current="page">상품</button>
       <button type="button" data-view="content">콘텐츠</button>
       <button type="button" data-view="jobs">예약</button>
+      <button type="button" data-view="metrics">성과</button>
       <button type="button" data-view="guide">시작하기</button>
     </nav>
     <span class="local-label">로컬 작업 공간</span>
@@ -109,6 +112,34 @@
       <div id="job-list" class="job-list"></div>
     </section>
 
+    <section id="view-metrics" aria-labelledby="metrics-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">04 / 수익 검증</p><h1 id="metrics-heading">발행 뒤의 결과를 기록하세요.</h1><p>WordPress·네이버·티스토리·기타 채널에서 직접 확인한 수치를 비교합니다. 이 목록은 자동 수집이나 수익 보장이 아닙니다.</p></div></div>
+      <p class="subtle-note">수동 입력 · 금액은 원화(KRW). 보고서의 같은 기간·시간대·귀속 기준을 사용하세요. 모르는 값은 비워두고, 확인한 0만 0으로 입력합니다. 서로 겹치는 기간을 더하거나 조건이 다른 채널을 단순 순위화하지 않습니다.</p>
+      <div id="metrics-notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="metrics-layout">
+        <section class="card"><div class="card-heading"><h2 id="metrics-form-title">성과 기록 추가</h2><button id="metrics-new" type="button" class="small">새 기록</button></div>
+          <form id="metrics-form"><fieldset id="metrics-fields" disabled>
+            <label>연결할 콘텐츠 *<select name="draft_id" id="metrics-draft" required></select></label>
+            <p class="field-help">연결된 글의 제목과 버전을 보관합니다. 이 기록을 추가해도 글을 승인·게시하지 않습니다.</p>
+            <label>게시 채널 *<select name="channel" required><option value="wordpress">WordPress</option><option value="naver">네이버</option><option value="tistory">티스토리</option><option value="other">기타</option></select></label>
+            <label>실제 게시글 URL<input name="page_url" type="url" maxlength="2048" placeholder="https:// (선택)"></label>
+            <div class="two-fields"><label>집계 시작일 *<input name="period_start" type="date" required></label><label>집계 종료일 *<input name="period_end" type="date" required></label></div>
+            <label>수치 출처·시간대·귀속 기준 *<textarea name="source" rows="2" maxlength="500" required placeholder="예: 사이트 조회 보고서 + 제휴 대시보드 / KST / 주문일 기준. 개인정보는 적지 마세요."></textarea></label>
+            <div class="two-fields"><label>조회수<input name="views" type="number" min="0" max="1000000000" step="1" placeholder="미입력"></label><label>제휴 링크 클릭수<input name="clicks" type="number" min="0" max="1000000000" step="1" placeholder="미입력"></label></div>
+            <label>주문수<input name="orders" type="number" min="0" max="1000000000" step="1" placeholder="미입력"></label>
+            <div class="two-fields"><label>확인한 수수료 수익 (원)<input name="revenue_won" type="number" min="0" max="1000000000000" step="0.01" placeholder="매출액 아님 / 미입력"></label><label>이 기록에 배분한 비용 (원)<input name="cost_won" type="number" min="0" max="1000000000000" step="0.01" placeholder="확인한 비용만"></label></div>
+            <label>메모<textarea name="note" rows="2" maxlength="1000" placeholder="실험한 제목·주제, 다음에 바꿔볼 점 (선택)"></textarea></label>
+            <div class="form-footer"><span id="metrics-edit-note" class="muted">자동 검증되지 않은 수동 기록입니다.</span><button id="metrics-save" type="submit" class="primary">기록 저장</button></div>
+          </fieldset></form>
+        </section>
+        <section class="metrics-results"><div class="card-heading"><h2>기록 비교 <span id="metrics-count" class="count">0</span></h2><div class="actions"><button id="metrics-add" type="button" class="small">기록 추가</button><button id="metrics-refresh" type="button" class="small">기록 새로고침</button><button id="metrics-export" type="button" class="small" disabled>전체 CSV 내보내기</button></div></div>
+          <label>표시할 채널<select id="metrics-filter"><option value="">전체</option><option value="wordpress">WordPress</option><option value="naver">네이버</option><option value="tistory">티스토리</option><option value="other">기타</option></select></label>
+          <p id="metrics-status" class="field-help">성과 탭을 열면 저장된 기록을 불러옵니다.</p>
+          <div id="metrics-list" class="job-list" aria-live="polite"></div>
+          <p class="field-help">클릭/조회, 주문/클릭 비율은 입력값의 산술 비율이며 정확한 전환 귀속을 보증하지 않습니다. 클릭당 수익은 수수료÷클릭입니다. 수익−입력 비용은 세금·취소·누락 비용을 반영한 최종 순이익이 아닙니다.</p>
+        </section>
+      </div>
+    </section>
 
     <section id="view-guide" aria-labelledby="guide-heading" hidden>
       <div class="page-heading"><div><p class="eyebrow">시작하기</p><h1 id="guide-heading">작게 만들고, 확인한 뒤 전달하세요.</h1><p>이 작업대가 하는 일과 하지 않는 일입니다.</p></div></div>

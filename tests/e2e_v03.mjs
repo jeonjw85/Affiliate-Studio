@@ -1,0 +1,83 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import {spawn} from 'node:child_process';
+import {setTimeout as delay} from 'node:timers/promises';
+
+const root=process.cwd(),temp=await fs.mkdtemp(path.join(os.tmpdir(),'studio-v03-browser-'));
+const artifacts=path.join(root,'artifacts');await fs.mkdir(artifacts,{recursive:true});
+const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
+const base=`http://127.0.0.1:${port}`;
+const server=spawn(path.join(root,'.venv/bin/python'),['run.py','--port',String(port)],{cwd:root,env:{...process.env,STUDIO_DATA_DIR:temp,WP_URL:'',WP_USERNAME:'',WP_APP_PASSWORD:'',AI_MODEL:''},stdio:['ignore','pipe','pipe']});
+let log='',browser;server.stdout.on('data',d=>log+=d);server.stderr.on('data',d=>log+=d);
+const report={scope:'실제 Chromium + 격리된 앱/SQLite. 모든 상품·성과 수치는 합성 시험 자료. 외부 플랫폼·실수익·AI 호출 없음.',checks:[]};
+try{
+  let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/api/state')).ok){ready=true;break;}}catch{}await delay(50);}assert.ok(ready,log);
+  const state=await(await fetch(base+'/api/state')).json();
+  const headers={'Content-Type':'application/json','X-CSRF-Token':state.csrf};
+  async function post(url,data){const r=await fetch(base+url,{method:'POST',headers,body:JSON.stringify(data)});assert.equal(r.status,200,await r.clone().text());return r.json();}
+  const product=await post('/api/products',{provider:'coupang',name:'검증용 유선 키보드',source_url:'https://example.com/product',affiliate_url:'https://example.com/affiliate',price:null,observed_at:new Date().toISOString(),facts:['USB 유선 연결'],audience:'문서 작성자',caveats:'합성 시험 데이터입니다.',ownership_confirmed:true});
+  const draft=await post('/api/drafts',{product_id:product.id});
+  await post(`/api/drafts/${draft.id}/approve`,{version:draft.version,confirmed:true});
+  const bin=process.env.CHROMIUM_PATH || [chromium.executablePath(),'/usr/bin/chromium','/usr/bin/google-chrome'].find(existsSync);
+  browser=await chromium.launch({headless:true,...(bin?{executablePath:bin}:{}),args:['--no-sandbox']});
+  const context=await browser.newContext({viewport:{width:1440,height:1000},timezoneId:'UTC'});
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+  await page.goto(base);await page.waitForFunction(()=>!document.querySelector('#product-fields').disabled);
+  await page.locator('nav [data-view="content"]').click();await page.locator('[data-select-draft]').first().click();
+  await page.waitForFunction(()=>!document.querySelector('#download-text').disabled);
+  const txtWait=page.waitForEvent('download');await page.locator('#download-text').click();const txtDl=await txtWait;
+  const txtPath=path.join(artifacts,'v03-approved-fixture.txt');await txtDl.saveAs(txtPath);const text=await fs.readFile(txtPath,'utf8');
+  assert.ok(text.startsWith('이 포스팅은 쿠팡 파트너스'));assert.ok(text.includes(product.affiliate_url));assert.ok(text.includes(product.source_url));
+  report.checks.push('승인본문 TXT 실제 다운로드: 광고 고지·출처·제휴 URL 보존');
+  await page.locator('nav [data-view="metrics"]').click();await page.waitForFunction(()=>!document.querySelector('#metrics-fields').disabled);
+  const form=page.locator('#metrics-form'),field=name=>form.locator(`[name="${name}"]`),today=new Date().toISOString().slice(0,10);
+  await field('channel').selectOption('naver');await field('page_url').fill('https://example.com/article');
+  await field('period_start').fill(today);await field('period_end').fill(today);await field('source').fill('=1+1');
+  await field('views').fill('0');await field('note').fill('<img src=x onerror=alert(1)> 합성 시험 메모');
+  for(const raw of ['1e3','1.230']){
+    await field('revenue_won').fill(raw);
+    assert.equal(await field('revenue_won').evaluate(e=>e.checkValidity()),false,'native Chromium blocks unsupported money format before sending');
+    await page.locator('#metrics-save').click();
+    assert.equal((await(await fetch(base+'/api/measurements')).json()).items.length,0);
+  }
+  await field('revenue_won').fill('');assert.equal(await field('revenue_won').evaluate(e=>e.checkValidity()),true);
+  report.checks.push('실제 Chromium 금액 사전 검증: 지수표기/과도한 소수 자릿수 거절·미입력 복구·저장 부작용 없음');
+  await page.locator('#metrics-save').click();await page.waitForFunction(()=>document.querySelectorAll('[data-edit-measurement]').length===1 && !document.querySelector('#metrics-fields').disabled);
+  let records=await(await fetch(base+'/api/measurements')).json();assert.equal(records.items.length,1);assert.equal(records.items[0].views,0);assert.equal(records.items[0].clicks,null);assert.equal(records.items[0].rates.click_rate,null);
+  assert.match(await page.locator('#metrics-list').innerText(),/미입력/);assert.match(await page.locator('#metrics-list').innerText(),/계산 불가/);
+  assert.equal(await page.locator('#metrics-list img').count(),0);
+  report.checks.push('네이버 채널 수동 기록 생성: 미입력과 0 구별, 수치 미제공 시 비율 계산 안 함, HTML 삽입 미실행');
+  await page.locator('[data-edit-measurement]').click();assert.equal(await field('draft_id').isDisabled(),true);
+  for(const [name,value] of Object.entries({views:'1000',clicks:'50',orders:'5',revenue_won:'2500.50',cost_won:'1000'}))await field(name).fill(value);
+  await page.locator('#metrics-save').click();await page.waitForFunction(()=>!document.querySelector('#metrics-fields').disabled && document.querySelector('#metrics-form-title').textContent==='성과 기록 추가');
+  records=await(await fetch(base+'/api/measurements')).json();const record=records.items[0];assert.equal(record.version,2);
+  assert.equal(record.rates.click_rate,(50/1000*100).toFixed(2));assert.equal(record.rates.order_rate,(5/50*100).toFixed(2));assert.equal(record.rates.balance_won,(2500.50-1000).toFixed(2));
+  assert.ok((await page.locator('#metrics-list').innerText()).includes((2500.50-1000).toLocaleString('ko-KR')+'원'));
+  report.checks.push('기록 수정: 입력 수치의 비율·클릭당 수익·수익−입력비용 서버 계산 및 화면 표시');
+  await page.reload();await page.waitForFunction(()=>!document.querySelector('#product-fields').disabled);
+  await page.locator('nav [data-view="metrics"]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-edit-measurement]').length===1);
+  const csvWait=page.waitForEvent('download');await page.locator('#metrics-export').click();const csvDl=await csvWait;
+  const csvPath=path.join(artifacts,'v03-metrics-fixture.csv');await csvDl.saveAs(csvPath);const csv=await fs.readFile(csvPath);
+  assert.equal(csv.subarray(0,3).toString('hex'),'efbbbf');assert.ok(csv.toString('utf8').includes("'=1+1"));
+  report.checks.push('새로고침 저장 유지·실제 UTF-8 BOM CSV 다운로드·수식 주입 방어');
+  await page.locator('#metrics-filter').selectOption('wordpress');assert.equal(await page.locator('[data-edit-measurement]').count(),0);
+  await page.locator('#metrics-filter').selectOption('naver');assert.equal(await page.locator('[data-edit-measurement]').count(),1);
+  await page.screenshot({path:path.join(artifacts,'v03-metrics-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'390px viewport no horizontal overflow');
+  assert.ok(await page.locator('nav [data-view="metrics"]').isVisible());
+  assert.ok(await page.evaluate(()=>document.querySelector('.metrics-results').getBoundingClientRect().top < document.querySelector('#metrics-form').getBoundingClientRect().top),'mobile results appear before the long input form');
+  await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(artifacts,'v03-metrics-mobile.png'),fullPage:true});
+  report.checks.push('채널 필터·390px 가로 넘침 없음·고정 메뉴 표시');
+  await page.locator('[data-delete-measurement]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-edit-measurement]').length===0);
+  records=await(await fetch(base+'/api/measurements')).json();assert.equal(records.items.length,0);
+  const after=await(await fetch(base+'/api/state')).json();assert.equal(after.drafts.length,1);assert.equal(after.drafts[0].status,'approved');
+  assert.deepEqual(errors,[]);report.checks.push('삭제 확인 뒤 성과기록만 제거·원본 승인글 유지·pageerror 0');
+  report.passed=true;await fs.writeFile(path.join(artifacts,'v03-browser-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+}catch(error){console.error(log);throw error;}
+finally{if(browser)await browser.close();server.kill('SIGTERM');await new Promise(resolve=>server.exitCode!==null?resolve():server.once('exit',resolve));await fs.rm(temp,{recursive:true,force:true});}

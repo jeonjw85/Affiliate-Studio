@@ -196,5 +196,7 @@ def create_app(data_dir=None):
     def index():
         return FileResponse(STATIC / 'index.html')
 
+    from .measurements import install_routes
+    install_routes(app, store)
     app.mount('/static', StaticFiles(directory=STATIC, check_dir=False), name='static')
     return app
