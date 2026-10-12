@@ -1,0 +1,14 @@
+.venv/
+node_modules/
+data/
+artifacts/
+dist/
+.env*
+__pycache__/
+.pytest_cache/
+*.pyc
+.hermes/
+BACKEND_TDD.md
+UI_TDD.md
+FIX_VERIFY.md
+.DS_Store
