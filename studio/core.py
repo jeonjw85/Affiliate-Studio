@@ -94,6 +94,12 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
             c.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL)")
+            from .publication import owner_alive
+            for kind, active, interrupted in (('operation', 'running', 'failed'),):
+                for record in self.rows(c, kind):
+                    if record['state'] == active and not owner_alive(record):
+                        record.update(state=interrupted, error='이전 AI 실행 프로세스가 종료됐습니다. 자동 재시도하지 않습니다.')
+                        self.put(c, kind, record)
 
     @contextmanager
     def connect(self):
@@ -217,11 +223,53 @@ class Store:
         with self.connect() as c:
             d = self.get(c, id, 'draft')
             p = self.get(c, d['product_id'], 'product')
-            return dict(draft=d, product=p, preview=render(d, p), checks=self.checks(d, p))
+            return dict(draft=d, product=p, preview=render(d, p), checks=self.checks(d, p),
+                        candidates=[x for x in self.rows(c, 'ai_candidate') if x['draft_id'] == id])
 
 
 
+    def generate_ai(self, id, version, style, confirmed, client):
+        if confirmed is not True or client is None:
+            raise ValueError('로컬 AI 연결 설정과 자료 전송 확인이 필요합니다.')
+        with self.connect() as c:
+            d = self.get(c, id, 'draft'); self.assert_version(d, version)
+            p = self.get(c, d['product_id'], 'product')
+            source = client.source(d, p, style)
+            operations = [x for x in self.rows(c, 'operation') if x.get('type') == 'ai']
+            if any(x['draft_id'] == id and x['state'] == 'running' for x in operations):
+                raise VersionConflict('AI 생성이 이미 진행 중입니다.')
+            if sum(x['created_at'][:10] == now().date().isoformat() for x in operations) >= client.daily_limit:
+                raise ValueError('오늘의 AI 실행 한도를 사용했습니다. 실패한 시도도 포함됩니다.')
+            op = dict(id=uuid.uuid4().hex, type='ai', draft_id=id, source_version=version,
+                      product_version=p['version'], state='running', created_at=now().isoformat(), _pid=os.getpid())
+            self.put(c, 'operation', op)
+        try:
+            generated = client.generate(source, len(p['facts']))
+            with self.connect() as c:
+                current = self.get(c, id, 'draft'); self.assert_version(current, version)
+                self.assert_version(self.get(c, p['id'], 'product'), p['version'])
+                candidate = dict(generated, id=uuid.uuid4().hex, draft_id=id, source_version=version,
+                                 product_version=p['version'], model=client.model, created_at=now().isoformat(),
+                                 warnings=['AI 근거 번호는 사실 검증이 아닙니다. 원문과 대조해 검토하세요.'])
+                self.put(c, 'ai_candidate', candidate)
+                op.update(state='completed', candidate_id=candidate['id'])
+                self.put(c, 'operation', op)
+                return candidate
+        except Exception as error:
+            with self.connect() as c:
+                op.update(state='failed'); self.put(c, 'operation', op)
+            if isinstance(error, ValueError): raise
+            raise ValueError('AI 생성에 실패했습니다. 자동 재시도하지 않습니다.') from None
 
+    def apply_candidate(self, id, candidate_id, version):
+        with self.connect() as c:
+            d = self.get(c, id, 'draft'); self.assert_version(d, version)
+            candidate = self.get(c, candidate_id, 'ai_candidate')
+            p = self.get(c, d['product_id'], 'product')
+            if candidate['draft_id'] != id or candidate['source_version'] != version or candidate['product_version'] != p['version']:
+                raise VersionConflict('후보의 원본 버전 또는 상품이 변경됐습니다. 다시 생성하세요.')
+            d.update(title=candidate['title'], body=candidate['body'])
+            return self.invalidate(c, d)
 
     def invalidate(self, c, d):
         d.update(version=d['version']+1, status='review', approved_at=None)

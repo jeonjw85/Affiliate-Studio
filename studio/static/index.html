@@ -49,7 +49,7 @@
     </section>
 
     <section id="view-content" aria-labelledby="content-heading" hidden>
-      <div class="page-heading"><div><p class="eyebrow">02 / 검토와 승인</p><h1 id="content-heading">초안을 읽고, 직접 승인하세요.</h1><p>템플릿에서 시작하세요. 사실과 표현을 직접 검토해야 합니다.</p></div></div>
+      <div class="page-heading"><div><p class="eyebrow">02 / 검토와 승인</p><h1 id="content-heading">초안을 읽고, 직접 승인하세요.</h1><p>템플릿에서 시작하거나 로컬 AI 후보를 비교하세요. 사실과 표현을 직접 검토해야 합니다.</p></div></div>
       <section class="card draft-picker"><h2>저장된 콘텐츠 <span id="draft-count" class="count">0</span></h2><div id="draft-list" class="draft-list"></div></section>
       <div id="content-empty" class="empty card"><h2>아직 선택한 콘텐츠가 없습니다.</h2><p>상품 탭에서 상품을 저장한 뒤 ‘초안 만들기’를 누르세요.</p><button type="button" data-view="products">상품으로 이동</button></div>
       <div id="draft-workspace" hidden>
@@ -68,6 +68,13 @@
             <details><summary>텍스트 패키지</summary><h3>일반 텍스트</h3><pre id="preview-text"></pre><h3>텔레그램용 텍스트</h3><pre id="preview-telegram"></pre><h3>추가 작성용 프롬프트</h3><pre id="preview-prompt"></pre></details>
           </section>
         </div>
+        <section class="card ai-card" aria-labelledby="ai-heading">
+          <div class="card-heading"><h2 id="ai-heading">로컬 AI 후보 비교</h2><button id="ai-check" type="button">AI 연결 확인</button></div>
+          <p id="ai-status" role="status">로컬 AI 설정 확인 중</p>
+          <p class="field-help">저장된 상품 사실과 초안을 로컬 OpenAI 호환 서버로 보냅니다. 제휴 URL은 보내지 않습니다. 후보는 자동 적용·승인되지 않으며 근거 번호는 사실 검증의 증거가 아닙니다.</p>
+          <div class="two-fields"><label>작성 유형<select id="ai-style"><option value="guide">구매 가이드</option><option value="concise">핵심 조건 요약</option></select></label><div><label class="check"><input id="confirmed-send" name="confirmed_send" type="checkbox"><span>현재 저장본을 설정된 로컬 AI에 보내는 데 동의합니다.</span></label><button id="ai-generate" type="button" disabled>AI 후보 생성</button></div></div>
+          <div id="candidate-list" class="candidate-list" aria-live="polite"></div>
+        </section>
         <section class="card review-card"><h2>내보내기 전 확인</h2><div id="checks" aria-live="polite"></div>
           <label class="check"><input id="approval-confirm" type="checkbox"><span>현재 저장본의 상품 정보, 제휴 고지, 표현과 정책상 주의사항을 직접 확인했습니다.</span></label>
           <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button><button id="download" type="button" disabled>승인본 ZIP 다운로드</button><button id="download-text" type="button" disabled>승인본문 TXT 가져오기</button></div>
@@ -90,11 +97,11 @@
       <div class="page-heading"><div><p class="eyebrow">시작하기</p><h1 id="guide-heading">작게 만들고, 확인한 뒤 전달하세요.</h1><p>이 작업대가 하는 일과 하지 않는 일입니다.</p></div></div>
       <div class="guide-grid">
         <article class="card"><span class="step">01</span><h2>상품 정보와 링크 입력</h2><p>쿠팡 파트너스 또는 토스에서 직접 발급한 본인의 제휴 URL을 입력하세요. 원본 URL, 확인한 사실, 가격 확인 시각을 기록합니다.</p><p>상품 수집, 제휴 링크 발급, 매출·수익 추적은 제공하지 않습니다. 토스 제휴 정책은 확인되지 않았으므로 직접 검토해야 합니다.</p></article>
-        <article class="card"><span class="step">02</span><h2>템플릿 초안 검토</h2><p>초안 만들기는 템플릿 생성입니다. 확인한 상품 사실로 초안을 만들고 직접 편집·검토·승인하세요. 가격·출처·고지는 서버 미리보기에 별도 포함됩니다.</p></article>
+        <article class="card"><span class="step">02</span><h2>템플릿 또는 로컬 AI 후보</h2><p>초안 만들기는 템플릿 생성입니다. 선택적으로 로컬 OpenAI 호환 서버를 실행하고 앱 서버 환경 변수 <code>AI_BASE_URL</code>, <code>AI_MODEL</code>을 지정하세요. 루프백 로컬 서버만 지원하며 유료 API나 API 키는 필요하지 않습니다.</p><p>설정됨은 연결 성공이 아닙니다. 콘텐츠에서 ‘AI 연결 확인’ 후 전송 범위에 동의하고 후보를 만드세요. 두 작성 유형의 후보를 원문과 비교한 뒤 적용하고 직접 검토·승인합니다. 가격·출처·고지는 서버 미리보기에 별도 포함됩니다.</p></article>
         <article class="card"><span class="step">03</span><h2>승인 후 ZIP 내보내기</h2><p>로컬 ZIP 생성 예약은 공개 게시가 아닙니다. 앱 서버가 실행 중일 때만 패키지를 만듭니다.</p><p>예약 탭에서 실행 결과를 확인하고, 필요하면 대기 중인 예약을 취소하세요. 승인본 ZIP과 광고 고지·출처·제휴 링크를 포함한 TXT를 내려받을 수 있습니다.</p></article>
       </div>
     </section>
-    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 직접 승인 → 로컬 ZIP 내보내기</span></footer>
+    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 후보 검토 → 직접 승인 → 로컬 ZIP 내보내기</span></footer>
   </main>
 </body>
 </html>

@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from .core import Store, VersionConflict
+from .ai import LocalAI
 
 
 STATIC = Path(__file__).parent / 'static'
@@ -21,6 +22,18 @@ def create_app(data_dir=None):
     token = secrets.token_urlsafe(32)
     task = None
     worker_error = ''
+    ai = None
+    ai_error = ''
+    ai_model = os.environ.get('AI_MODEL', '')
+    if ai_model:
+        try:
+            ai = LocalAI(os.environ.get('AI_BASE_URL', 'http://127.0.0.1:11434/v1'), ai_model,
+                         os.environ.get('AI_TIMEOUT_SECONDS', '180'), os.environ.get('AI_DAILY_LIMIT', '10'))
+        except ValueError:
+            ai_error = '로컬 AI 환경변수 형식을 확인하세요. 외부 AI 주소는 허용하지 않습니다.'
+    else:
+        ai_error = '로컬 모델 서버를 실행하고 AI_MODEL을 설정하세요.'
+
     async def worker():
         nonlocal worker_error
         while True:
@@ -81,10 +94,19 @@ def create_app(data_dir=None):
 
     @app.get('/api/state')
     def state():
-        return dict(store.state(), csrf=token, connections={}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
+        return dict(store.state(), csrf=token, connections={'ai': ai is not None, 'ai_model': ai_model, 'ai_error': ai_error}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
 
+    @app.post('/api/ai/check')
+    def ai_check(body: dict):
+        return ai.check() if ai else dict(available=False, model=ai_model, models=[], error=ai_error)
 
+    @app.post('/api/drafts/{id}/ai')
+    def generate_ai(id: str, body: dict):
+        return store.generate_ai(id, body.get('version'), body.get('style'), body.get('confirmed_send'), ai)
 
+    @app.post('/api/drafts/{id}/candidates/{candidate_id}/apply')
+    def apply_ai(id: str, candidate_id: str, body: dict):
+        return store.apply_candidate(id, candidate_id, body.get('version'))
 
 
 
