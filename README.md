@@ -313,3 +313,13 @@ node tests/e2e_copy.mjs
 두 경로 모두 일회용 `127.0.0.1` WordPress fixture 전용, 실제 사용자 사이트 실행 금지
 브라우저 v0.2 시험은 AI HTTP fixture 사용
 실제 모델 생성은 별도 live probe로 검증
+
+## 라이선스
+
+GNU General Public License v3.0 (GPL-3.0)
+
+Copyright (C) 2026 Jeongwan Jeon
+
+이 프로그램은 자유 소프트웨어입니다. 자유 소프트웨어 재단이 발표한 GNU 일반 공중 사용 허가서 버전 3 또는 이후 버전의 조건에 따라 재배포하거나 수정할 수 있습니다.
+
+자세한 내용은 [LICENSE](LICENSE) 파일을 참고하세요.
