@@ -21,9 +21,28 @@ def create_app(data_dir=None):
     token = secrets.token_urlsafe(32)
     task = None
     worker_error = ''
+    async def worker():
+        nonlocal worker_error
+        while True:
+            try:
+                await asyncio.to_thread(store.run_due, data / 'exports')
+                worker_error = ''
+            except Exception:
+                worker_error = '예약 처리 오류: DB 또는 저장 폴더를 확인하세요.'
+            await asyncio.sleep(1)
 
+    @asynccontextmanager
+    async def lifespan(app):
+        nonlocal task
+        task = asyncio.create_task(worker())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
 
     @app.exception_handler(ValueError)
@@ -94,10 +113,37 @@ def create_app(data_dir=None):
     def approve(id: str, body: dict):
         return store.approve(id, body.get('version'), body.get('confirmed'))
 
+    @app.get('/api/drafts/{id}/download')
+    def download(id: str, version: int):
+        return Response(store.package(id, version), media_type='application/zip', headers={'Content-Disposition':f'attachment; filename="content-{id}.zip"'})
 
+    @app.get('/api/drafts/{id}/text')
+    def approved_text(id: str, version: int):
+        from .exporting import render
+        with store.connect() as c:
+            d, p = store.approved_pair(c, id, version)
+            content = render(d, p)['text']
+        return Response(content, media_type='text/plain', headers={
+            'Content-Disposition': f'attachment; filename="content-{d["id"]}-v{d["version"]}.txt"'})
 
+    @app.post('/api/drafts/{id}/schedule')
+    def schedule(id: str, body: dict):
+        return store.schedule(id, body.get('version'), body.get('run_at'))
 
+    @app.post('/api/jobs/{id}/cancel')
+    def cancel(id: str):
+        return store.cancel_job(id)
 
+    @app.get('/api/jobs/{id}/download')
+    def download_job(id: str):
+        with store.connect() as c:
+            j = store.get(c, id, 'job')
+        if j['state'] != 'completed' or not j['artifact']:
+            raise ValueError('완료된 파일이 없습니다.')
+        path = data / 'exports' / j['artifact']
+        if not path.is_file():
+            raise ValueError('생성한 파일이 삭제되었거나 이동됐습니다.')
+        return FileResponse(path, media_type='application/zip', filename=j['artifact'])
 
 
     @app.get('/')

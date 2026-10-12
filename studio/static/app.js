@@ -2,19 +2,19 @@
 function actionState(draft, dirty, confirmed, busy, hasErrors) {
   const ready = Boolean(draft) && !dirty && !busy && !hasErrors;
   const approved = ready && draft.status === 'approved';
-  return {approve: ready && Boolean(confirmed) && !approved};
+  return {approve: ready && Boolean(confirmed) && !approved, download: approved, schedule: approved};
 }
 if (typeof module !== 'undefined') module.exports = {actionState};
 
 if (typeof document !== 'undefined') (() => {
   const $ = id => document.getElementById(id);
-  let state = {products:[], drafts:[]}, detail = null;
+  let state = {products:[], drafts:[], jobs:[]}, detail = null;
   let productId = null, productVersion = null, productDirty = false, busy = false, stale = false;
   const gates = new WeakMap();
   const names = ['provider','name','source_url','affiliate_url','price','observed_at','facts','audience','caveats','ownership_confirmed'];
   const field = name => $('product-form').elements.namedItem(name);
   const idPath = id => encodeURIComponent(String(id));
-  const states = {review:'검토 필요',approved:'승인됨'};
+  const states = {review:'검토 필요',approved:'승인됨',pending:'대기 중',completed:'완료',failed:'실패',cancelled:'취소됨',uncertain:'결과 불명'};
   const dirty = () => Boolean(detail) && ($('draft-title').value !== detail.draft.title || $('draft-body').value !== detail.draft.body);
   const hasErrors = () => Boolean(detail?.checks?.errors?.length);
   function message(text, error = false) { $('notice').textContent = text; $('notice').className = error ? 'notice error' : 'notice'; $('notice').hidden = !text; }
@@ -43,14 +43,16 @@ if (typeof document !== 'undefined') (() => {
     for (const el of document.querySelectorAll('[data-action]')) el.disabled = busy || !(gates.get(el)?.() ?? true);
     const edited = dirty();
     const actions = actionState(detail?.draft, edited || stale || productDirty, $('approval-confirm').checked, busy, hasErrors());
-    for (const name of ['approve']) $(name).disabled = !actions[name];
+    for (const name of ['approve','download','schedule']) $(name).disabled = !actions[name];
+    $('download-text').disabled = !actions.download;
     $('product-fields').disabled = busy || !state.csrf;
     $('draft-fields').disabled = busy || !detail || stale;
     $('save-draft').disabled = busy || !detail || !edited || stale;
     $('approval-confirm').disabled = busy || !detail || edited || stale || productDirty || hasErrors() || detail?.draft.status === 'approved';
+    $('run-at').disabled = busy || !actions.schedule;
     $('reload-draft').disabled = busy || !detail;
-    $('refresh').disabled = busy; $('new-product').disabled = busy;
-    $('dirty-status').textContent = stale ? '서버 버전 충돌 · 저장본을 다시 불러오세요.' : edited ? '저장되지 않은 수정 · 승인이 잠겼습니다.' : detail ? `저장된 버전 ${detail.draft.version}` : '';
+    $('refresh').disabled = busy; $('refresh-jobs').disabled = busy; $('new-product').disabled = busy;
+    $('dirty-status').textContent = stale ? '서버 버전 충돌 · 저장본을 다시 불러오세요.' : edited ? '저장되지 않은 수정 · 승인과 내보내기가 잠겼습니다.' : detail ? `저장된 버전 ${detail.draft.version}` : '';
   }
   async function run(task, success) {
     if (busy) return;
@@ -94,9 +96,24 @@ if (typeof document !== 'undefined') (() => {
       item.setAttribute('aria-pressed',String(detail?.draft.id===d.id)); $('draft-list').append(item);
     }
   }
+  function renderJobs() {
+    $('job-list').replaceChildren();
+    $('worker-status').textContent=state.worker_running?'작업 실행기 동작 중 · 서버가 실행 중일 때만 대기 작업을 처리합니다.':'작업 실행기 중지 · 대기 작업이 실행되지 않습니다. 서버 상태를 확인하세요.';
+    if (!state.jobs.length) $('job-list').append(node('div','예약된 작업이 없습니다. 승인한 콘텐츠에서 로컬 패키지 생성을 예약하세요.','card empty'));
+    for (const j of state.jobs) {
+      const card=node('article',null,'card job-card'), info=node('div'), actions=node('div',null,'actions');
+      const draft=state.drafts.find(d=>d.id===j.draft_id);
+      info.append(node('h3',draft?.title || `콘텐츠 #${j.draft_id}`),node('span',states[j.state]||j.state,`badge ${j.state}`),node('p',`${dateText(j.run_at)} · 버전 ${j.version}`,'meta'));
+      if(j.error) info.append(node('p',j.error,'job-error'));
+      if(j.state==='uncertain') info.append(node('p','결과를 확인한 뒤 조치하세요. 자동으로 재시도하지 않습니다.','job-error'));
+      if(j.state==='pending') actions.append(button('예약 취소',()=>run(async()=>{await api(`/api/jobs/${idPath(j.id)}/cancel`,'POST',{});await refreshState();if(detail&&!dirty())await loadDraft(detail.draft.id);},'예약을 취소했습니다.')));
+      if(j.state==='completed') actions.append(button('ZIP 다운로드',()=>run(()=>download(`/api/jobs/${idPath(j.id)}/download`,`package-${j.id}.zip`),'패키지를 내려받았습니다.')));
+      card.append(info,actions); $('job-list').append(card);
+    }
+  }
   async function refreshState() {
     const next=await api('/api/state');
-    state=next; state.products ||= []; state.drafts ||= [];
+    state=next; state.products ||= []; state.drafts ||= []; state.jobs ||= [];
     if (detail && state.drafts.some(d => d.id === detail.draft.id && d.version !== detail.draft.version)) stale = true;
     if (detail) {
       const latest=await api(`/api/drafts/${idPath(detail.draft.id)}`);
@@ -106,7 +123,7 @@ if (typeof document !== 'undefined') (() => {
       renderReview();
     }
     $('connection-status').textContent=`서버 연결됨 · 상품 ${state.products.length} · 콘텐츠 ${state.drafts.length}`;
-    renderProducts();renderDrafts();sync();
+    renderProducts();renderDrafts();renderJobs();sync();
   }
   async function loadDraft(id) {
     const next=await api(`/api/drafts/${idPath(id)}`);
@@ -127,9 +144,15 @@ if (typeof document !== 'undefined') (() => {
     for(const [type,label] of [['errors','오류'],['warnings','주의']]) for(const check of detail.checks?.[type]||[]) $('checks').append(node('p',`${label}: ${typeof check==='string'?check:JSON.stringify(check)}`,type==='errors'?'check-error':'check-warning'));
     if(!hasErrors()) $('checks').append(node('p','차단 오류 없음 · 자동 검사는 사실 확인과 정책 검토를 대신하지 않습니다.','muted'));
   }
+  async function download(url, filename) {
+    const res=await fetch(url,{credentials:'same-origin',cache:'no-store'});
+    if(!res.ok) { const p=await res.json().catch(()=>({})); const error=new Error(p.error||`다운로드 실패 (${res.status})`);error.status=res.status;throw error; }
+    const blob=await res.blob(), objectURL=URL.createObjectURL(blob), a=node('a'); a.href=objectURL; a.download=filename; document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(objectURL),1000);
+  }
   async function refreshDetailAndState() { await refreshState(); if(detail) await loadDraft(detail.draft.id); }
   document.querySelectorAll('[data-view]').forEach(el=>el.addEventListener('click',()=>show(el.dataset.view)));
   $('refresh').addEventListener('click',()=>run(refreshState,'상태를 갱신했습니다. 콘텐츠 편집 내용은 유지됩니다.'));
+  $('refresh-jobs').addEventListener('click',()=>run(refreshState,'예약 상태를 갱신했습니다.'));
   $('new-product').addEventListener('click',()=>{if(canLeaveProduct()) fillProduct(null);});
   $('product-form').addEventListener('input',()=>{productDirty=true;sync();});
   $('product-form').addEventListener('change',()=>{productDirty=true;sync();});
@@ -156,6 +179,12 @@ if (typeof document !== 'undefined') (() => {
     run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}`,'PUT',{version:detail.draft.version,title:$('draft-title').value,body:$('draft-body').value});await refreshDetailAndState();},'수정본을 저장했습니다. 기존 승인이 해제되었으므로 다시 확인하세요.');
   });
   $('approve').addEventListener('click',()=>{if($('approve').disabled)return;run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}/approve`,'POST',{version:detail.draft.version,confirmed:true});await refreshDetailAndState();},'현재 저장본을 승인했습니다.');});
+  $('download').addEventListener('click',()=>{if($('download').disabled)return;run(async()=>{await download(`/api/drafts/${idPath(detail.draft.id)}/download?version=${detail.draft.version}`,`content-${detail.draft.id}.zip`);await refreshDetailAndState();},'승인본 패키지를 내려받았습니다.');});
+  $('download-text').addEventListener('click',()=>{if($('download-text').disabled)return;run(()=>download(`/api/drafts/${idPath(detail.draft.id)}/text?version=${detail.draft.version}`,`content-${detail.draft.id}-v${detail.draft.version}.txt`),'광고 고지와 링크를 포함한 승인본문을 가져왔습니다. 게시 채널의 허용 조건을 직접 확인하세요.');});
+  $('schedule-form').addEventListener('submit',event=>{
+    event.preventDefault();if($('schedule').disabled||!$('schedule-form').reportValidity())return;
+    run(async()=>{const run_at=iso($('run-at').value);if(new Date(run_at).getTime()<=Date.now())throw new Error('예약 시각은 현재보다 이후여야 합니다.');await api(`/api/drafts/${idPath(detail.draft.id)}/schedule`,'POST',{version:detail.draft.version,run_at});await refreshDetailAndState();show('jobs');},'로컬 패키지 생성을 예약했습니다. 외부에 게시되지 않습니다.');
+  });
   window.addEventListener('beforeunload',event=>{if(dirty()||productDirty){event.preventDefault();event.returnValue='';}});
   run(refreshState);
 })();

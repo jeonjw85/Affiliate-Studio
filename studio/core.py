@@ -127,10 +127,66 @@ class Store:
 
 
 
+    def schedule(self, id, version, run_at):
+        due = timestamp(run_at)
+        if not 0 < (due - now()).total_seconds() <= 30*86400:
+            raise ValueError('예약 시각은 현재 이후 30일 이내로 지정하세요.')
+        with self.connect() as c:
+            d, _ = self.approved_pair(c, id, version)
+            self.assert_version(d, version)
+            old = next((j for j in self.rows(c, 'job') if j['draft_id'] == id and j['version'] == version and j['state'] in ('pending', 'completed')), None)
+            if old:
+                return old
+            j = dict(id=uuid.uuid4().hex, draft_id=id, version=version, run_at=due.isoformat(), state='pending', error='', artifact=None, created_at=now().isoformat())
+            return self.put(c, 'job', j)
 
+    def cancel_job(self, id):
+        with self.connect() as c:
+            j = self.get(c, id, 'job')
+            if j['state'] != 'pending':
+                raise ValueError('대기 중인 예약만 취소할 수 있습니다.')
+            j.update(state='cancelled', error='사용자가 취소함')
+            return self.put(c, 'job', j)
 
+    def run_due(self, output, at=None):
+        from .exporting import bundle
+        output = Path(output); output.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with self.connect() as c:
+            for j in self.rows(c, 'job'):
+                if j['state'] != 'pending' or timestamp(j['run_at']) > (at or now()):
+                    continue
+                try:
+                    d, p = self.approved_pair(c, j['draft_id'], j['version'])
+                    artifact = j['id'] + '.zip'
+                    temp = output / (artifact + '.tmp')
+                    temp.write_bytes(bundle(d, p))
+                    temp.replace(output / artifact)
+                    j.update(state='completed', artifact=artifact, completed_at=now().isoformat())
+                except ValueError as e:
+                    j.update(state='failed', error=str(e))
+                except OSError:
+                    j.update(state='failed', error='파일 저장 실패: 저장 공간과 폴더 권한을 확인하세요.')
+                self.put(c, 'job', j)
+                count += 1
+        return count
 
+    def approved_pair(self, c, id, version=None):
+        d = self.get(c, id, 'draft')
+        if version is not None:
+            self.assert_version(d, version)
+        p = self.get(c, d['product_id'], 'product')
+        if d['status'] != 'approved' or not d['approved_at']:
+            raise ValueError('현재 버전의 검토 승인이 필요합니다.')
+        errors = self.checks(d, p)['errors']
+        if errors:
+            raise ValueError(' / '.join(errors))
+        return d, p
 
+    def package(self, id, version=None):
+        from .exporting import bundle
+        with self.connect() as c:
+            return bundle(*self.approved_pair(c, id, version))
 
     def assert_version(self, d, version):
         if type(version) is not int or d['version'] != version:
@@ -169,6 +225,10 @@ class Store:
 
     def invalidate(self, c, d):
         d.update(version=d['version']+1, status='review', approved_at=None)
+        for j in self.rows(c, 'job'):
+            if j['draft_id'] == d['id'] and j['state'] == 'pending':
+                j.update(state='cancelled', error='콘텐츠 또는 근거 수정으로 승인이 무효화됨')
+                self.put(c, 'job', j)
         return self.put(c, 'draft', d)
 
     def edit_draft(self, id, version, title, body):

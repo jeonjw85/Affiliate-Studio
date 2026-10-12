@@ -15,6 +15,7 @@
     <nav aria-label="주 메뉴">
       <button type="button" data-view="products" aria-current="page">상품</button>
       <button type="button" data-view="content">콘텐츠</button>
+      <button type="button" data-view="jobs">예약</button>
       <button type="button" data-view="guide">시작하기</button>
     </nav>
     <span class="local-label">로컬 작업 공간</span>
@@ -64,16 +65,25 @@
             <p class="preview-note">저장된 서버 버전 기준입니다. 편집 중인 내용은 저장 후 반영됩니다.</p>
             <iframe id="preview-frame" title="저장된 콘텐츠 HTML 미리보기" sandbox="" referrerpolicy="no-referrer"></iframe>
             <details><summary>상품 사실·출처 확인</summary><dl id="product-facts" class="facts"></dl></details>
-            <details><summary>텍스트 미리보기</summary><h3>일반 텍스트</h3><pre id="preview-text"></pre><h3>텔레그램용 텍스트</h3><pre id="preview-telegram"></pre><h3>추가 작성용 프롬프트</h3><pre id="preview-prompt"></pre></details>
+            <details><summary>텍스트 패키지</summary><h3>일반 텍스트</h3><pre id="preview-text"></pre><h3>텔레그램용 텍스트</h3><pre id="preview-telegram"></pre><h3>추가 작성용 프롬프트</h3><pre id="preview-prompt"></pre></details>
           </section>
         </div>
-        <section class="card review-card"><h2>직접 검토 후 승인</h2><div id="checks" aria-live="polite"></div>
+        <section class="card review-card"><h2>내보내기 전 확인</h2><div id="checks" aria-live="polite"></div>
           <label class="check"><input id="approval-confirm" type="checkbox"><span>현재 저장본의 상품 정보, 제휴 고지, 표현과 정책상 주의사항을 직접 확인했습니다.</span></label>
-          <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button></div>
+          <div class="actions"><button id="approve" type="button" class="primary" disabled>현재 버전 승인</button><button id="download" type="button" disabled>승인본 ZIP 다운로드</button><button id="download-text" type="button" disabled>승인본문 TXT 가져오기</button></div>
+          <p class="field-help">TXT에는 광고 고지·출처·제휴 링크가 함께 들어갑니다. 허용된 게시 채널에 직접 붙여 넣고, 그 채널의 고지 표시와 링크 정책을 다시 확인하세요. 자동으로 게시하지 않습니다.</p>
+          <form id="schedule-form" class="schedule-form"><label>패키지 생성 예약 시각<input id="run-at" type="datetime-local" required></label><button id="schedule" type="submit" disabled>로컬 패키지 예약</button></form>
+          <p class="field-help">예약은 자동 게시가 아닙니다. 서버가 실행 중일 때 승인본의 로컬 ZIP 패키지를 생성합니다.</p>
         </section>
       </div>
     </section>
 
+    <section id="view-jobs" aria-labelledby="jobs-heading" hidden>
+      <div class="page-heading"><div><p class="eyebrow">03 / 운영</p><h1 id="jobs-heading">예약과 실행 기록</h1><p>로컬 ZIP 생성 예약과 실행 기록을 확인하세요.</p></div><button id="refresh-jobs" type="button">예약 상태 새로고침</button></div>
+      <h2>로컬 ZIP 생성 기록 · 외부 게시 아님</h2>
+      <div class="subtle-note" id="worker-status">작업 실행기 상태를 확인하는 중입니다.</div>
+      <div id="job-list" class="job-list"></div>
+    </section>
 
 
     <section id="view-guide" aria-labelledby="guide-heading" hidden>
@@ -81,9 +91,10 @@
       <div class="guide-grid">
         <article class="card"><span class="step">01</span><h2>상품 정보와 링크 입력</h2><p>쿠팡 파트너스 또는 토스에서 직접 발급한 본인의 제휴 URL을 입력하세요. 원본 URL, 확인한 사실, 가격 확인 시각을 기록합니다.</p><p>상품 수집, 제휴 링크 발급, 매출·수익 추적은 제공하지 않습니다. 토스 제휴 정책은 확인되지 않았으므로 직접 검토해야 합니다.</p></article>
         <article class="card"><span class="step">02</span><h2>템플릿 초안 검토</h2><p>초안 만들기는 템플릿 생성입니다. 확인한 상품 사실로 초안을 만들고 직접 편집·검토·승인하세요. 가격·출처·고지는 서버 미리보기에 별도 포함됩니다.</p></article>
+        <article class="card"><span class="step">03</span><h2>승인 후 ZIP 내보내기</h2><p>로컬 ZIP 생성 예약은 공개 게시가 아닙니다. 앱 서버가 실행 중일 때만 패키지를 만듭니다.</p><p>예약 탭에서 실행 결과를 확인하고, 필요하면 대기 중인 예약을 취소하세요. 승인본 ZIP과 광고 고지·출처·제휴 링크를 포함한 TXT를 내려받을 수 있습니다.</p></article>
       </div>
     </section>
-    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 직접 승인</span></footer>
+    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 직접 승인 → 로컬 ZIP 내보내기</span></footer>
   </main>
 </body>
 </html>

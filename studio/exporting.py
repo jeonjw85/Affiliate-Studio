@@ -7,6 +7,16 @@ DISCLOSURES = {
     'toss': '이 글에는 토스쇼핑 제휴 링크가 포함되어 있으며, 링크를 통한 구매 시 작성자가 수수료를 받을 수 있습니다.'
 }
 
+def bundle(d, p):
+    import io
+    import zipfile
+    parts = render(d, p)
+    files = {'article.html': '<!doctype html><html lang="ko"><meta charset="utf-8"><title>' + escape(d['title']) + '</title><body>' + parts['html'] + '</body></html>', 'article.txt': parts['text'], 'telegram.txt': parts['telegram'], 'ai-review-prompt.txt': parts['prompt'], 'evidence.json': json.dumps(dict(draft=d, product=p), ensure_ascii=False, indent=2), 'README.txt': '검토한 콘텐츠 패키지입니다. 공개 발행·Telegram 전송·수익 발생을 뜻하지 않습니다. 가격 및 게시 매체 약관을 다시 확인한 뒤 사용하세요. 개인정보 및 제휴 식별자가 포함될 수 있으므로 공개 저장소에 올리지 마세요.'}
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, content in files.items():
+            z.writestr(name, content)
+    return stream.getvalue()
 
 
 def render(d, p):
