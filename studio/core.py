@@ -30,7 +30,7 @@ def quantities(value):
 
 def text(value, limit=1000):
     if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 and c not in '\n\t' for c in value):
-        raise ValueError('빈 값 또는 너무 긴 텍스트입니다.')
+        raise ValueError('빈 값 또는 너무 긴 텍스트')
     return value.strip()
 
 
@@ -41,7 +41,7 @@ def timestamp(value):
             raise ValueError()
         return result.astimezone(timezone.utc)
     except (ValueError, TypeError, AttributeError, OverflowError):
-        raise ValueError('시간대가 포함된 올바른 날짜가 필요합니다.') from None
+        raise ValueError('시간대가 포함된 올바른 날짜 필요') from None
 
 
 def safe_url(value):
@@ -59,24 +59,24 @@ def safe_url(value):
         else:
             raise ValueError()
     except ValueError:
-        raise ValueError('로그인 정보 없는 HTTPS 공개 도메인 링크가 필요합니다.') from None
+        raise ValueError('로그인 정보 없는 HTTPS 공개 도메인 링크 필요') from None
     return value
 
 
 def validate_product(data):
     if not isinstance(data, dict) or data.get('provider') not in ('coupang', 'toss'):
-        raise ValueError('쿠팡 또는 토스를 선택하세요.')
+        raise ValueError('쿠팡 또는 토스 선택 필요')
     if data.get('ownership_confirmed') is not True:
-        raise ValueError('본인 제휴 링크와 허용된 게시 매체를 직접 확인하세요.')
+        raise ValueError('본인 제휴 링크와 허용된 게시 매체는 직접 확인 필요')
     price = data.get('price')
     if price is not None and (type(price) is not int or not 0 < price <= 100000000):
-        raise ValueError('가격은 양의 정수 원 단위로 입력하거나 비워두세요.')
+        raise ValueError('가격은 양의 정수 원 단위로 입력하거나 비워두기')
     observed = timestamp(data.get('observed_at'))
     if (observed - now()).total_seconds() > 60:
-        raise ValueError('미래 시각을 확인 시점으로 기록할 수 없습니다.')
+        raise ValueError('미래 시각은 확인 시점으로 기록 불가')
     facts = data.get('facts')
     if not isinstance(facts, list) or not 1 <= len(facts) <= 20:
-        raise ValueError('출처에서 확인한 사실을 1~20개 기록하세요.')
+        raise ValueError('출처에서 확인한 사실 1~20개 필요')
     return dict(provider=data['provider'], name=text(data.get('name'), 160), source_url=safe_url(data.get('source_url')), affiliate_url=safe_url(data.get('affiliate_url')), price=price, observed_at=observed.isoformat(), facts=[text(f, 500) for f in facts], audience=text(data.get('audience'), 500), caveats=text(data.get('caveats'), 1000), ownership_confirmed=True)
 
 
@@ -98,7 +98,7 @@ class Store:
             for kind, active, interrupted in (('operation', 'running', 'failed'), ('delivery', 'sending', 'uncertain'), ('publication', 'sending', 'uncertain')):
                 for record in self.rows(c, kind):
                     if record['state'] == active and not owner_alive(record):
-                        record.update(state=interrupted, error='이전 실행 프로세스가 종료됐습니다. 자동 재전송하지 않습니다. 원격 초안은 WordPress에서 확인하세요.')
+                        record.update(state=interrupted, error='이전 실행 프로세스 종료됨: 자동 재전송 안 함, 원격 초안은 WordPress에서 확인 필요')
                         self.put(c, kind, record)
 
     @contextmanager
@@ -119,7 +119,7 @@ class Store:
         id = text(id, 64)
         row = c.execute("SELECT data FROM records WHERE id=? AND kind=?", (id, kind)).fetchone()
         if not row:
-            raise ValueError("항목을 찾을 수 없습니다.")
+            raise ValueError("항목을 찾을 수 없음")
         return json.loads(row[0])
 
     def rows(self, c, kind):
@@ -145,12 +145,12 @@ class Store:
 
     def wordpress_draft(self, id, version, confirmed, client):
         if confirmed is not True or client is None:
-            raise ValueError('WordPress 연결 설정과 외부 초안 전송 확인이 필요합니다.')
+            raise ValueError('WordPress 연결 설정과 외부 초안 전송 확인 필요')
         with self.connect() as c:
             d, p = self.approved_pair(c, id, version)
             self.assert_version(d, version)
             if any(x['draft_id'] == id and x['state'] in ('sending', 'future', 'uncertain') for x in self.rows(c, 'publication')):
-                raise VersionConflict('공개 예약을 먼저 취소하거나 조회하세요.')
+                raise VersionConflict('공개 예약을 먼저 취소하거나 조회 필요')
             old = next((x for x in self.rows(c, 'delivery') if x['draft_id'] == id and x['version'] == version and x['target'] == client.url), None)
             if old:
                 return old
@@ -160,14 +160,14 @@ class Store:
             result.update(client.create(d, p), state='completed')
         except Exception:
             # POST may have succeeded even if a response/readback was lost. No retry.
-            result.update(state='uncertain', error='전송 결과를 확정할 수 없습니다. WordPress 관리자에서 확인하세요. 중복 방지를 위해 자동 재전송하지 않습니다.')
+            result.update(state='uncertain', error='전송 결과 불명: WordPress 관리자에서 확인 필요 (중복 방지를 위해 자동 재전송 안 함)')
         with self.connect() as c:
             return self.put(c, 'delivery', result)
 
     def schedule(self, id, version, run_at):
         due = timestamp(run_at)
         if not 0 < (due - now()).total_seconds() <= 30*86400:
-            raise ValueError('예약 시각은 현재 이후 30일 이내로 지정하세요.')
+            raise ValueError('예약 시각은 현재 이후 30일 이내로 지정 필요')
         with self.connect() as c:
             d, _ = self.approved_pair(c, id, version)
             self.assert_version(d, version)
@@ -181,7 +181,7 @@ class Store:
         with self.connect() as c:
             j = self.get(c, id, 'job')
             if j['state'] != 'pending':
-                raise ValueError('대기 중인 예약만 취소할 수 있습니다.')
+                raise ValueError('대기 중인 예약만 취소 가능')
             j.update(state='cancelled', error='사용자가 취소함')
             return self.put(c, 'job', j)
 
@@ -203,7 +203,7 @@ class Store:
                 except ValueError as e:
                     j.update(state='failed', error=str(e))
                 except OSError:
-                    j.update(state='failed', error='파일 저장 실패: 저장 공간과 폴더 권한을 확인하세요.')
+                    j.update(state='failed', error='파일 저장 실패: 저장 공간과 폴더 권한 확인 필요')
                 self.put(c, 'job', j)
                 count += 1
         return count
@@ -214,7 +214,7 @@ class Store:
             self.assert_version(d, version)
         p = self.get(c, d['product_id'], 'product')
         if d['status'] != 'approved' or not d['approved_at']:
-            raise ValueError('현재 버전의 검토 승인이 필요합니다.')
+            raise ValueError('현재 버전의 검토 승인 필요')
         errors = self.checks(d, p)['errors']
         if errors:
             raise ValueError(' / '.join(errors))
@@ -227,12 +227,12 @@ class Store:
 
     def assert_version(self, d, version):
         if type(version) is not int or d['version'] != version:
-            raise VersionConflict('버전이 변경됐습니다. 새로고침 후 다시 검토하세요.')
+            raise VersionConflict('버전 변경됨: 새로고침 후 다시 검토 필요')
 
     def checks(self, d, p):
         errors = []
         if p['price'] is not None and (now() - timestamp(p['observed_at'])).total_seconds() > 86400:
-            errors.append('가격 정보가 24시간 이상 지났습니다. 상품을 수정해 실제 정보를 재확인하거나 가격을 비우세요.')
+            errors.append('가격 정보 확인 후 24시간 경과: 상품을 수정해 실제 정보를 재확인하거나 가격 삭제 필요')
         checked_body = d['body']
         if d.get('body_format') == 'markdown-v1':
             from .formatting import render_body
@@ -240,17 +240,17 @@ class Store:
         combined = '\n'.join([d['title'], checked_body, p['name'], p['audience'], p['caveats'], *p['facts']])
         risky = [word for word in ('써보니', '사용해보니', '직접 사용', '무조건', '최저가', '100%', '수익 보장', '완치') if word in combined]
         if risky:
-            errors.append('근거 확인이 필요한 후기/단정 표현을 제거하세요: ' + ', '.join(risky))
+            errors.append('근거 확인이 필요한 후기/단정 표현 제거 필요: ' + ', '.join(risky))
         supplied = '\n'.join([p['name'], *p['facts']])
         if p['price'] is not None:
             supplied += f"\n{p['price']}원"
         allowed = quantities(supplied)
         ungrounded = [label for key, label in quantities(d['title'] + '\n' + checked_body).items() if key not in allowed]
         if ungrounded:
-            errors.append('등록된 근거에 없는 수치를 제거하거나 상품 근거에 출처를 확인해 기록하세요: ' + ', '.join(ungrounded))
-        warnings = ['이 점검은 문구·일부 수치 휴리스틱이며 모든 허위 주장, 법률·약관 준수나 상품 정보의 진실성을 검증하지 않습니다.', '링크 소유권·수익 귀속·가격·이미지 사용 권리와 게시 매체 등록은 직접 확인하세요.']
+            errors.append('등록된 근거에 없는 수치는 제거하거나 출처 확인 후 상품 근거에 기록 필요: ' + ', '.join(ungrounded))
+        warnings = ['이 점검은 문구와 일부 수치만 휴리스틱으로 확인하며, 모든 허위 주장이나 법률·약관 준수, 상품 정보의 진실성은 검증하지 않음', '링크 소유권·수익 귀속·가격·이미지 사용 권리와 게시 매체 등록은 직접 확인 필요']
         if p['provider'] == 'toss':
-            warnings.append('토스 링크의 블로그 게시 허용 여부와 최신 대가성 표시 문구를 앱의 이용조건에서 확인하세요.')
+            warnings.append('토스 링크의 블로그 게시 허용 여부와 최신 대가성 표시 문구는 토스 앱 이용조건에서 확인 필요')
         return dict(errors=errors, warnings=warnings)
 
     def detail(self, id):
@@ -269,11 +269,11 @@ class Store:
 
     def assert_unlocked(self, c, id):
         if self.locked(c, id):
-            raise VersionConflict('원격 전송 또는 공개 예약이 잠겨 있습니다. 먼저 취소하거나 상태를 확인하세요.')
+            raise VersionConflict('원격 전송 또는 공개 예약 잠김: 먼저 취소하거나 상태 확인 필요')
 
     def generate_ai(self, id, version, style, confirmed, client):
         if confirmed is not True or client is None:
-            raise ValueError('로컬 AI 연결 설정과 자료 전송 확인이 필요합니다.')
+            raise ValueError('로컬 AI 연결 설정과 자료 전송 확인 필요')
         with self.connect() as c:
             d = self.get(c, id, 'draft'); self.assert_version(d, version)
             self.assert_unlocked(c, id)
@@ -281,9 +281,9 @@ class Store:
             source = client.source(d, p, style)
             operations = [x for x in self.rows(c, 'operation') if x.get('type') == 'ai']
             if any(x['draft_id'] == id and x['state'] == 'running' for x in operations):
-                raise VersionConflict('AI 생성이 이미 진행 중입니다.')
+                raise VersionConflict('AI 생성이 이미 진행 중')
             if sum(x['created_at'][:10] == now().date().isoformat() for x in operations) >= client.daily_limit:
-                raise ValueError('오늘의 AI 실행 한도를 사용했습니다. 실패한 시도도 포함됩니다.')
+                raise ValueError('오늘의 AI 실행 한도 소진 (실패한 시도도 포함)')
             op = dict(id=uuid.uuid4().hex, type='ai', draft_id=id, source_version=version,
                       product_version=p['version'], state='running', created_at=now().isoformat(), _pid=os.getpid())
             self.put(c, 'operation', op)
@@ -295,7 +295,7 @@ class Store:
                 self.assert_unlocked(c, id)
                 candidate = dict(generated, id=uuid.uuid4().hex, draft_id=id, source_version=version,
                                  product_version=p['version'], model=client.model, created_at=now().isoformat(),
-                                 warnings=['AI 근거 번호는 사실 검증이 아닙니다. 원문과 대조해 검토하세요.'])
+                                 warnings=['AI 근거 번호는 사실 검증이 아님: 원문과 대조해 검토 필요'])
                 self.put(c, 'ai_candidate', candidate)
                 op.update(state='completed', candidate_id=candidate['id'])
                 self.put(c, 'operation', op)
@@ -304,7 +304,7 @@ class Store:
             with self.connect() as c:
                 op.update(state='failed'); self.put(c, 'operation', op)
             if isinstance(error, ValueError): raise
-            raise ValueError('AI 생성에 실패했습니다. 자동 재시도하지 않습니다.') from None
+            raise ValueError('AI 생성 실패: 자동 재시도 안 함') from None
 
     def apply_candidate(self, id, candidate_id, version):
         with self.connect() as c:
@@ -313,10 +313,10 @@ class Store:
             candidate = self.get(c, candidate_id, 'ai_candidate')
             p = self.get(c, d['product_id'], 'product')
             if candidate['draft_id'] != id or candidate['source_version'] != version or candidate['product_version'] != p['version']:
-                raise VersionConflict('후보의 원본 버전 또는 상품이 변경됐습니다. 다시 생성하세요.')
+                raise VersionConflict('후보의 원본 버전 또는 상품 변경됨: 다시 생성 필요')
             mode = candidate.get('body_format', 'plain')
             if mode not in ('plain', 'markdown-v1'):
-                raise ValueError('지원하지 않는 후보 서식입니다.')
+                raise ValueError('지원하지 않는 후보 서식')
             d.update(title=candidate['title'], body=candidate['body'], body_format=mode)
             return self.invalidate(c, d)
 
@@ -334,7 +334,7 @@ class Store:
             self.assert_unlocked(c, id)
             mode = d.get('body_format', 'plain') if body_format is None else body_format
             if mode not in ('plain', 'markdown-v1'):
-                raise ValueError('지원하지 않는 본문 서식입니다.')
+                raise ValueError('지원하지 않는 본문 서식')
             d.update(title=text(title, 200), body=text(body, 20000), body_format=mode)
             return self.invalidate(c, d)
 
@@ -343,7 +343,7 @@ class Store:
             d = self.get(c, id, 'draft'); self.assert_version(d, version)
             p = self.get(c, d['product_id'], 'product')
             if confirmed is not True:
-                raise ValueError('출처·내용·제휴 링크·광고 표시를 직접 검토했다는 확인이 필요합니다.')
+                raise ValueError('출처·내용·제휴 링크·광고 표시를 직접 검토했다는 확인 필요')
             errors = self.checks(d, p)['errors']
             if errors:
                 raise ValueError(' / '.join(errors))
@@ -358,7 +358,7 @@ class Store:
                 if draft['product_id'] == id:
                     self.assert_unlocked(c, draft['id'])
             if any(old['id'] != id and old['source_url'].split('#')[0] == valid['source_url'].split('#')[0] for old in self.rows(c, 'product')):
-                raise ValueError('중복 상품 URL입니다.')
+                raise ValueError('중복 상품 URL')
             p.update(valid, version=p['version']+1)
             self.put(c, 'product', p)
             for d in self.rows(c, 'draft'):
@@ -380,5 +380,5 @@ class Store:
         p = dict(validate_product(data), id=uuid.uuid4().hex, version=1, created_at=now().isoformat())
         with self.connect() as c:
             if any(old['source_url'].split('#')[0] == p['source_url'].split('#')[0] for old in self.rows(c, 'product')):
-                raise ValueError('같은 출처 URL의 중복 상품입니다.')
+                raise ValueError('같은 출처 URL의 중복 상품')
             return self.put(c, 'product', p)

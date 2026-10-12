@@ -29,9 +29,9 @@ def create_app(data_dir=None):
         try:
             wp = WordPress(*env)
         except ValueError:
-            wp_error = 'WordPress 서버 환경변수 형식을 확인하세요.'
+            wp_error = 'WordPress 서버 환경변수 형식 확인 필요'
     elif any(env):
-        wp_error = 'WordPress 환경변수 세 개를 모두 설정해야 합니다.'
+        wp_error = 'WordPress 환경변수 세 개 모두 설정 필요'
     task = None
     worker_error = ''
     ai = None
@@ -42,9 +42,9 @@ def create_app(data_dir=None):
             ai = LocalAI(os.environ.get('AI_BASE_URL', 'http://127.0.0.1:11434/v1'), ai_model,
                          os.environ.get('AI_TIMEOUT_SECONDS', '180'), os.environ.get('AI_DAILY_LIMIT', '10'))
         except ValueError:
-            ai_error = '로컬 AI 환경변수 형식을 확인하세요. 외부 AI 주소는 허용하지 않습니다.'
+            ai_error = '로컬 AI 환경변수 형식 확인 필요 (외부 AI 주소는 허용 안 함)'
     else:
-        ai_error = '로컬 모델 서버를 실행하고 AI_MODEL을 설정하세요.'
+        ai_error = '로컬 모델 서버 실행과 AI_MODEL 설정 필요'
 
     async def worker():
         nonlocal worker_error
@@ -53,7 +53,7 @@ def create_app(data_dir=None):
                 await asyncio.to_thread(store.run_due, data / 'exports')
                 worker_error = ''
             except Exception:
-                worker_error = '예약 처리 오류: DB 또는 저장 폴더를 확인하세요.'
+                worker_error = '예약 처리 오류: DB 또는 저장 폴더 확인 필요'
             await asyncio.sleep(1)
 
     @asynccontextmanager
@@ -78,23 +78,23 @@ def create_app(data_dir=None):
     async def boundary(request: Request, call_next):
         host = request.headers.get('host', '')
         if not re.fullmatch(r'(?:127\.0\.0\.1|localhost)(?::[0-9]{1,5})?', host):
-            return JSONResponse({'error':'로컬 접속만 지원합니다.'}, status_code=403)
+            return JSONResponse({'error':'로컬 접속만 지원'}, status_code=403)
         origin = request.headers.get('origin')
         if origin and origin != f'{request.url.scheme}://{host}':
-            return JSONResponse({'error':'다른 출처의 요청은 허용하지 않습니다.'}, status_code=403)
+            return JSONResponse({'error':'다른 출처의 요청은 허용 안 함'}, status_code=403)
         if request.headers.get('sec-fetch-site') == 'cross-site':
-            return JSONResponse({'error':'외부 사이트 요청은 차단됩니다.'}, status_code=403)
+            return JSONResponse({'error':'외부 사이트 요청 차단'}, status_code=403)
         if request.method not in ('GET', 'HEAD'):
             supplied = request.headers.get('x-csrf-token', '')
             if not secrets.compare_digest(supplied, token):
-                return JSONResponse({'error':'화면을 새로고침하고 다시 시도하세요.'}, status_code=403)
+                return JSONResponse({'error':'화면 새로고침 후 다시 시도 필요'}, status_code=403)
             if request.headers.get('content-type', '').split(';')[0] != 'application/json':
-                return JSONResponse({'error':'JSON 요청만 지원합니다.'}, status_code=415)
+                return JSONResponse({'error':'JSON 요청만 지원'}, status_code=415)
             raw = bytearray()
             async for chunk in request.stream():
                 raw.extend(chunk)
                 if len(raw) > 131072:
-                    return JSONResponse({'error':'요청이 너무 큽니다.'}, status_code=413)
+                    return JSONResponse({'error':'요청 크기 초과'}, status_code=413)
             request._body = bytes(raw)
         response = await call_next(request)
         response.headers.update({
@@ -187,10 +187,10 @@ def create_app(data_dir=None):
         with store.connect() as c:
             j = store.get(c, id, 'job')
         if j['state'] != 'completed' or not j['artifact']:
-            raise ValueError('완료된 파일이 없습니다.')
+            raise ValueError('완료된 파일 없음')
         path = data / 'exports' / j['artifact']
         if not path.is_file():
-            raise ValueError('생성한 파일이 삭제되었거나 이동됐습니다.')
+            raise ValueError('생성한 파일이 삭제되었거나 이동됨')
         return FileResponse(path, media_type='application/zip', filename=j['artifact'])
 
     @app.post('/api/drafts/{id}/wordpress')

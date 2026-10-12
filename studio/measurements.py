@@ -15,13 +15,13 @@ from .core import VersionConflict, now, safe_url, text
 
 async def _body(request):
     def reject_constant(value):
-        raise ValueError('NaN/Infinity는 허용하지 않습니다.')
+        raise ValueError('NaN/Infinity는 허용 안 함')
     try:
         body = json.loads(await request.body(), parse_constant=reject_constant)
     except (ValueError, UnicodeDecodeError, RecursionError):
-        raise ValueError('올바른 JSON 객체가 필요합니다.') from None
+        raise ValueError('올바른 JSON 객체 필요') from None
     if not isinstance(body, dict):
-        raise ValueError('JSON 객체가 필요합니다.')
+        raise ValueError('JSON 객체 필요')
     return body
 
 
@@ -29,7 +29,7 @@ def _validate(body):
     result = {'draft_id': text(body.get('draft_id'), 64)}
     channel = body.get('channel')
     if not isinstance(channel, str) or channel not in ('wordpress', 'naver', 'tistory', 'other'):
-        raise ValueError('올바른 채널을 선택하세요.')
+        raise ValueError('올바른 채널 선택 필요')
     result['channel'] = channel
     url = body.get('page_url', '')
     result['page_url'] = '' if url == '' else safe_url(url)
@@ -37,28 +37,28 @@ def _validate(body):
     for field in ('period_start', 'period_end'):
         value = body.get(field)
         if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
-            raise ValueError('기간은 YYYY-MM-DD 형식이어야 합니다.')
+            raise ValueError('기간은 YYYY-MM-DD 형식으로 입력 필요')
         dates.append(date.fromisoformat(value))
         result[field] = value
     if dates[1] < dates[0] or dates[1] > now().date() + timedelta(days=1):
-        raise ValueError('기간 순서 또는 미래 날짜를 확인하세요.')
+        raise ValueError('기간 순서 또는 미래 날짜 확인 필요')
     result['source'] = text(body.get('source'), 500)
     note = body.get('note', '')
     if not isinstance(note, str) or len(note) > 1000:
-        raise ValueError('메모는 1000자 이하 문자열이어야 합니다.')
+        raise ValueError('메모는 1000자 이하 문자열로 입력 필요')
     result['note'] = text(note, 1000) if note.strip() else ''
     for field in ('views', 'clicks', 'orders'):
         value = body.get(field)
         if value is not None and (type(value) is not int or not 0 <= value <= 10**9):
-            raise ValueError('조회/클릭/주문은 null 또는 0~10억 정수여야 합니다.')
+            raise ValueError('조회/클릭/주문은 null 또는 0~10억 정수로 입력 필요')
         result[field] = value
     for field in ('revenue_won', 'cost_won'):
         value = body.get(field)
         if value is not None:
             if not isinstance(value, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?', value):
-                raise ValueError('금액은 소수 2자리 이하 숫자 문자열이어야 합니다.')
+                raise ValueError('금액은 소수 2자리 이하 숫자 문자열로 입력 필요')
             if Decimal(value) > 10**12:
-                raise ValueError('금액은 1조 이하여야 합니다.')
+                raise ValueError('금액은 1조 이하로 입력 필요')
             value = _format(Decimal(value))
         result[field] = value
     return result
@@ -76,15 +76,15 @@ def _public(row, others=()):
 
     warnings = []
     for high, low, message in (
-        ('clicks', 'views', '클릭이 조회보다 많습니다. 반복 클릭 또는 귀속 기준을 확인하세요.'),
-        ('orders', 'clicks', '주문이 클릭보다 많습니다. 귀속 기준을 확인하세요.'),
+        ('clicks', 'views', '클릭이 조회보다 많음: 반복 클릭 또는 귀속 기준 확인 필요'),
+        ('orders', 'clicks', '주문이 클릭보다 많음: 귀속 기준 확인 필요'),
     ):
         if row[high] is not None and row[low] is not None and row[high] > row[low]:
             warnings.append(message)
     if any(other['id'] != row['id'] and _key(other)[:3] == _key(row)[:3]
            and other['period_start'] <= row['period_end'] and row['period_start'] <= other['period_end']
            for other in others):
-        warnings.append('동일 콘텐츠/채널/URL의 기록 기간이 겹칩니다. 단순 합산하지 마세요.')
+        warnings.append('동일 콘텐츠/채널/URL의 기록 기간 중복: 단순 합산 금지')
     revenue, cost = row.get('revenue_won'), row.get('cost_won')
     return dict(row, rates=dict(click_rate=ratio(row.get('clicks'), row.get('views'), 100),
                                order_rate=ratio(row.get('orders'), row.get('clicks'), 100),
@@ -99,14 +99,14 @@ def _key(row):
 
 def _unique(row, others):
     if any(other['id'] != row.get('id') and _key(other) == _key(row) for other in others):
-        raise VersionConflict('동일 콘텐츠/채널/URL/기간의 중복 기록입니다.')
+        raise VersionConflict('동일 콘텐츠/채널/URL/기간의 중복 기록')
 
 
 def _version(row, version):
     if type(version) is not int or version < 1:
-        raise ValueError('버전은 양의 정수여야 합니다.')
+        raise ValueError('버전은 양의 정수 필요')
     if row['version'] != version:
-        raise VersionConflict('기록이 변경되었습니다. 새로고침 후 다시 시도하세요.')
+        raise VersionConflict('기록 변경됨: 새로고침 후 다시 시도 필요')
 
 
 def _csv(rows):
@@ -166,7 +166,7 @@ def install_routes(app, store):
             _version(old, body.get('version'))
             valid = _validate(body)
             if valid['draft_id'] != old['draft_id']:
-                raise ValueError('연결된 콘텐츠는 변경할 수 없습니다.')
+                raise ValueError('연결된 콘텐츠는 변경 불가')
             row = dict(old, **valid)
             rows = store.rows(c, 'measurement')
             _unique(row, rows)

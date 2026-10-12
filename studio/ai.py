@@ -17,22 +17,22 @@ class LocalAI:
             timeout = float(timeout); daily_limit = int(daily_limit)
             if not 1 <= timeout <= 240 or not 1 <= daily_limit <= 100: raise ValueError()
         except (ValueError, TypeError):
-            raise ValueError('AI는 로컬 http loopback /v1 주소, 1~240초 제한, 1~100회 한도가 필요합니다.') from None
+            raise ValueError('AI는 로컬 http loopback /v1 주소, 1~240초 제한, 1~100회 한도 필요') from None
         self.url = url.rstrip('/')
         self.model = text(model, 200)
         if self.model.lower().endswith((':cloud', '-cloud')) or '-cloud:' in self.model.lower():
-            raise ValueError('클라우드 모델 대신 다운로드한 로컬 모델을 지정하세요.')
+            raise ValueError('클라우드 모델 대신 다운로드한 로컬 모델 지정 필요')
         self.timeout = timeout
         self.daily_limit = daily_limit
 
     def request(self, method, path, payload=None):
         with httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False) as client:
             with client.stream(method, self.url + path, json=payload) as response:
-                if response.status_code != 200: raise ValueError('로컬 AI 응답 상태를 확인하세요.')
+                if response.status_code != 200: raise ValueError('로컬 AI 응답 상태 확인 필요')
                 raw = bytearray()
                 for chunk in response.iter_bytes():
                     raw.extend(chunk)
-                    if len(raw) > 65536: raise ValueError('AI 응답이 너무 큽니다.')
+                    if len(raw) > 65536: raise ValueError('AI 응답 크기 초과')
                 return json.loads(raw)
 
     def check(self):
@@ -41,19 +41,19 @@ class LocalAI:
             models = [text(x['id'], 200) for x in data['data']]
             available = self.model in models
             return dict(available=available, model=self.model, models=models,
-                        error='' if available else '설정한 모델을 로컬 서버에서 찾을 수 없습니다.')
+                        error='' if available else '설정한 모델을 로컬 서버에서 찾을 수 없음')
         except Exception:
-            return dict(available=False, model=self.model, models=[], error='로컬 AI 모델 조회에 실패했습니다.')
+            return dict(available=False, model=self.model, models=[], error='로컬 AI 모델 조회 실패')
 
     def source(self, draft, product, style):
-        if style not in ('guide', 'concise'): raise ValueError('AI 작성 유형을 선택하세요.')
+        if style not in ('guide', 'concise'): raise ValueError('AI 작성 유형 선택 필요')
         # Deliberate allowlist: no affiliate URL, rendered content or WP credentials.
         source = dict(style=style, product={k: product[k] for k in
                       ('name', 'facts', 'price', 'observed_at', 'audience', 'caveats')},
                       draft={'title': draft['title'], 'body': draft['body']})
         raw = json.dumps(source, ensure_ascii=False)
         if len(raw) > 5000 or len(raw.encode()) > 6500:
-            raise ValueError('AI 입력이 너무 깁니다. 작은 로컬 모델을 위해 근거와 본문을 줄이세요.')
+            raise ValueError('AI 입력 길이 초과: 작은 로컬 모델에 맞게 근거와 본문을 줄일 필요')
         # User-entered prose might itself contain the protected affiliate URL.
         return raw.replace(product['affiliate_url'], '[제휴 링크 생략]')
 
@@ -84,4 +84,4 @@ class LocalAI:
             if not isinstance(refs, list) or not refs or len(refs) > fact_count or any(type(i) is not int or not 1 <= i <= fact_count for i in refs): raise ValueError()
             return dict(title=title, body=body, evidence_refs=sorted(set(refs)), body_format='markdown-v1')
         except Exception:
-            raise ValueError('AI 생성 실패: 연결, 제한 또는 JSON 제목·본문·근거 번호를 확인하세요. 자동 재시도하지 않습니다.') from None
+            raise ValueError('AI 생성 실패: 연결, 제한 또는 JSON 제목·본문·근거 번호 확인 필요 (자동 재시도 안 함)') from None

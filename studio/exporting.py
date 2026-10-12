@@ -37,7 +37,7 @@ def render(d, p):
         content = render_body(d['body'])
         body_html, body_text = content['html'], content['text']
     else:
-        raise ValueError('지원하지 않는 본문 서식입니다.')
+        raise ValueError('지원하지 않는 본문 서식')
     html += body_html
     html += '<h2>확인한 상품 정보</h2><ul>' + ''.join('<li>' + e(f) + '</li>' for f in p['facts']) + '</ul>'
     html += '<p>' + e(info).replace('\n','<br>') + '</p>'

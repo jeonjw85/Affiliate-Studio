@@ -71,7 +71,7 @@ try {
   }
   assert.ok(completed,'예약 실행 후 DB 완료 상태 확인');
   await page.locator('#refresh-jobs').click();
-  await page.waitForFunction(()=>document.querySelector('#notice').textContent!=='처리 중입니다.');
+  await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
   await page.screenshot({path:path.join(artifacts,'jobs-debug.png'),fullPage:true});
   await fs.writeFile(path.join(artifacts,'jobs-debug.txt'),await page.locator('body').innerText());
   await page.getByRole('button',{name:'ZIP 다운로드',exact:true}).waitFor();
@@ -98,7 +98,7 @@ try {
   await page.getByRole('button',{name:'콘텐츠',exact:true}).click();await page.locator('[data-select-draft]').click();
   await page.locator('#approval-confirm').check();await page.locator('#approve').click();await page.waitForFunction(()=>!document.querySelector('#wordpress').disabled);
   await page.route('**/api/drafts/*/wordpress',r=>r.fulfill({json:{state:'uncertain',error:'시험: 전송 결과 미확정'}}));
-  await page.locator('#wordpress').click();await page.waitForFunction(()=>document.querySelector('#notice').textContent!=='처리 중입니다.');
+  await page.locator('#wordpress').click();await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
   assert.ok((await page.locator('#notice').innerText()).includes('미확정'),'결과 불명은 성공으로 표시하지 않는다');
   report.checks.push('UI 시험 응답 uncertain은 성공 안내 금지 (외부 WordPress 실행 아님)');
   report.passed=true;

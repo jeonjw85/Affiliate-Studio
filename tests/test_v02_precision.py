@@ -41,7 +41,7 @@ def test_oversized_source_is_rejected_before_ai_request(tmp_path):
     s, p, d = ready(tmp_path)
     s.edit_draft(d['id'], 1, '제목', '가' * 6000)
     with ai_server() as (url, remote):
-        with pytest.raises(ValueError, match='너무'): s.generate_ai(d['id'], 2, 'guide', True, LocalAI(url, 'local-test'))
+        with pytest.raises(ValueError, match='AI 입력 길이 초과'): s.generate_ai(d['id'], 2, 'guide', True, LocalAI(url, 'local-test'))
         assert remote.requests == []
 
 
