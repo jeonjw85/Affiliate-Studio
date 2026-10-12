@@ -233,7 +233,11 @@ class Store:
         errors = []
         if p['price'] is not None and (now() - timestamp(p['observed_at'])).total_seconds() > 86400:
             errors.append('가격 정보가 24시간 이상 지났습니다. 상품을 수정해 실제 정보를 재확인하거나 가격을 비우세요.')
-        combined = '\n'.join([d['title'], d['body'], p['name'], p['audience'], p['caveats'], *p['facts']])
+        checked_body = d['body']
+        if d.get('body_format') == 'markdown-v1':
+            from .formatting import render_body
+            checked_body += '\n' + render_body(d['body'])['text']
+        combined = '\n'.join([d['title'], checked_body, p['name'], p['audience'], p['caveats'], *p['facts']])
         risky = [word for word in ('써보니', '사용해보니', '직접 사용', '무조건', '최저가', '100%', '수익 보장', '완치') if word in combined]
         if risky:
             errors.append('근거 확인이 필요한 후기/단정 표현을 제거하세요: ' + ', '.join(risky))
@@ -241,7 +245,7 @@ class Store:
         if p['price'] is not None:
             supplied += f"\n{p['price']}원"
         allowed = quantities(supplied)
-        ungrounded = [label for key, label in quantities(d['title'] + '\n' + d['body']).items() if key not in allowed]
+        ungrounded = [label for key, label in quantities(d['title'] + '\n' + checked_body).items() if key not in allowed]
         if ungrounded:
             errors.append('등록된 근거에 없는 수치를 제거하거나 상품 근거에 출처를 확인해 기록하세요: ' + ', '.join(ungrounded))
         warnings = ['이 점검은 문구·일부 수치 휴리스틱이며 모든 허위 주장, 법률·약관 준수나 상품 정보의 진실성을 검증하지 않습니다.', '링크 소유권·수익 귀속·가격·이미지 사용 권리와 게시 매체 등록은 직접 확인하세요.']
@@ -310,7 +314,10 @@ class Store:
             p = self.get(c, d['product_id'], 'product')
             if candidate['draft_id'] != id or candidate['source_version'] != version or candidate['product_version'] != p['version']:
                 raise VersionConflict('후보의 원본 버전 또는 상품이 변경됐습니다. 다시 생성하세요.')
-            d.update(title=candidate['title'], body=candidate['body'])
+            mode = candidate.get('body_format', 'plain')
+            if mode not in ('plain', 'markdown-v1'):
+                raise ValueError('지원하지 않는 후보 서식입니다.')
+            d.update(title=candidate['title'], body=candidate['body'], body_format=mode)
             return self.invalidate(c, d)
 
     def invalidate(self, c, d):
@@ -321,11 +328,14 @@ class Store:
                 self.put(c, 'job', j)
         return self.put(c, 'draft', d)
 
-    def edit_draft(self, id, version, title, body):
+    def edit_draft(self, id, version, title, body, body_format=None):
         with self.connect() as c:
             d = self.get(c, id, 'draft'); self.assert_version(d, version)
             self.assert_unlocked(c, id)
-            d.update(title=text(title, 200), body=text(body, 20000))
+            mode = d.get('body_format', 'plain') if body_format is None else body_format
+            if mode not in ('plain', 'markdown-v1'):
+                raise ValueError('지원하지 않는 본문 서식입니다.')
+            d.update(title=text(title, 200), body=text(body, 20000), body_format=mode)
             return self.invalidate(c, d)
 
     def approve(self, id, version, confirmed):
@@ -362,8 +372,8 @@ class Store:
             existing = next((d for d in self.rows(c, 'draft') if d['product_id'] == product_id), None)
             if existing:
                 return existing
-            body = f"{p['audience']}을 위한 구매 전 정보 정리입니다. 판매 페이지에서 확인한 내용과 구매 전에 살펴볼 조건을 구분했습니다.\n\n구매 전 확인할 점\n{p['caveats']}\n\n배송비, 옵션별 가격, 반품 조건은 결제 화면에서 별도로 확인하세요. 상품 정보와 가격은 확인 시점 이후 달라질 수 있습니다."
-            d = dict(id=uuid.uuid4().hex, product_id=product_id, title=p['name'] + ' 구매 전 확인할 정보', body=body, version=1, status='review', approved_at=None, created_at=now().isoformat())
+            body = f"{p['audience']}을 위한 구매 전 정보 정리입니다. 판매 페이지에서 확인한 내용과 구매 전에 살펴볼 조건을 구분했습니다.\n\n## 구매 전 확인할 점\n{p['caveats']}\n\n배송비, 옵션별 가격, 반품 조건은 결제 화면에서 별도로 확인하세요. 상품 정보와 가격은 확인 시점 이후 달라질 수 있습니다."
+            d = dict(id=uuid.uuid4().hex, product_id=product_id, title=p['name'] + ' 구매 전 확인할 정보', body=body, body_format='markdown-v1', version=1, status='review', approved_at=None, created_at=now().isoformat())
             return self.put(c, 'draft', d)
 
     def add_product(self, data):

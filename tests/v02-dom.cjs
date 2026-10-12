@@ -14,6 +14,12 @@ async function setup() {
   const dom=new JSDOM(html,{url:'http://localhost:8090',runScripts:'outside-only'});
   const w=dom.window; const $=id=>w.document.getElementById(id); const confirmations=[];
   w.confirm=text=>{confirmations.push(text);return true;};
+  // JSDOM has no native editing/undo engine; E2E verifies real browser history.
+  w.document.execCommand=(command,_ui,text)=>{
+    assert.equal(command,'insertText');const input=w.document.activeElement;
+    input.setRangeText(text,input.selectionStart,input.selectionEnd,'end');
+    input.dispatchEvent(new w.Event('input',{bubbles:true}));return true;
+  };
   let custom=()=>undefined;
   w.fetch=async(url,options={})=>{
     const req={url,method:options.method||'GET',body:options.body?JSON.parse(options.body):null}; requests.push(req);
@@ -25,6 +31,75 @@ async function setup() {
   w.document.querySelector('[data-select-draft]').click(); await tick();
   return {w,$,state,detail,requests,confirmations,tick,route:fn=>{custom=fn;},close:()=>w.close()};
 }
+
+
+test('evidence table inserts after the selected line without replacing reviewed text or numbers',async()=>{
+  const h=await setup();try{
+    const mode=h.$('body-format');mode.value='markdown-v1';mode.dispatchEvent(new h.w.Event('change'));
+    const body=h.$('draft-body'),button=h.w.document.querySelector('[data-format="table"]');
+    const source='지우면 안 되는 직접 검토 문장 001.20\n다음 단락 007.10';
+    for(const [start,end] of [[0,source.length],[3,8],[6,6],[0,0]]){
+      body.value=source;body.setSelectionRange(start,end);button.click();
+      const table=body.value.match(/\n\n\| 항목 \| 확인한 내용 \|[\s\S]*?\n\n/);
+      assert.ok(table,'inserted evidence table');assert.equal(body.value.replace(table[0],''),source,'all original prose must survive');
+      assert.ok(body.value.includes('지우면 안 되는 직접 검토 문장 001.20'),'do not split the original line');
+      assert.equal(h.$('download').disabled,true);
+    }
+    body.value='x'.repeat(19999);body.setSelectionRange(4,40);button.click();
+    assert.equal(body.value,'x'.repeat(19999),'oversized insertion is rejected without replacing selection');
+  }finally{h.close();}
+});
+
+
+test('heading tools replace existing heading prefixes without accumulating or losing values',async()=>{
+  const h=await setup();try{
+    h.$('body-format').value='markdown-v1';h.$('body-format').dispatchEvent(new h.w.Event('change'));
+    const body=h.$('draft-body'),h2=h.w.document.querySelector('[data-format="h2"]'),h3=h.w.document.querySelector('[data-format="h3"]');
+    body.value='첫 줄 001.20\n둘째 줄 007.10';body.setSelectionRange(0,0);h2.click();
+    assert.equal(body.value,'## 첫 줄 001.20\n둘째 줄 007.10');h3.click();
+    assert.equal(body.value,'### 첫 줄 001.20\n둘째 줄 007.10');h3.click();
+    assert.equal(body.value,'### 첫 줄 001.20\n둘째 줄 007.10');h2.click();
+    assert.equal(body.value,'## 첫 줄 001.20\n둘째 줄 007.10');
+    body.value='### ## 이미 중첩된 제목 001.20';body.setSelectionRange(0,0);h3.click();
+    assert.equal(body.value,'### 이미 중첩된 제목 001.20');
+    body.value='\\## 문자 그대로';body.setSelectionRange(0,0);h2.click();assert.equal(body.value,'## \\## 문자 그대로');
+  }finally{h.close();}
+});
+
+
+test('unsupported native editing leaves original text and selection untouched',async()=>{
+  const h=await setup();try{
+    h.$('body-format').value='markdown-v1';h.$('body-format').dispatchEvent(new h.w.Event('change'));
+    const body=h.$('draft-body');
+    for(const exec of [undefined,()=>false,()=>{throw Error('not supported');}]){
+      h.w.document.execCommand=exec;body.value='원문 001.20';body.setSelectionRange(1,4,'backward');
+      h.w.document.querySelector('[data-format="table"]').click();
+      assert.equal(body.value,'원문 001.20');assert.equal(body.selectionStart,1);assert.equal(body.selectionEnd,4);assert.equal(body.selectionDirection,'backward');
+      assert.equal(h.requests.some(r=>r.method==='PUT'),false);
+    }
+  }finally{h.close();}
+});
+
+test('format selection and tools preserve approval gates, selected text, and remote locks',async()=>{
+  const h=await setup();try{
+    const mode=h.$('body-format');assert.ok(mode,'format selector');
+    assert.equal(mode.value,'plain');
+    assert.equal(h.$('download').disabled,false);
+    const bold=h.w.document.querySelector('[data-format="bold"]');assert.equal(bold.disabled,true);
+    mode.value='markdown-v1';mode.dispatchEvent(new h.w.Event('change'));
+    assert.equal(h.$('download').disabled,true);assert.equal(h.$('save-draft').disabled,false);
+    const body=h.$('draft-body');body.value='확인한 조건';body.setSelectionRange(0,3);bold.click();
+    assert.equal(body.value,'**확인한** 조건');
+    body.value='\n본문';body.setSelectionRange(0,0);h.w.document.querySelector('[data-format="h2"]').click();
+    assert.equal(body.value,'## \n본문','first empty line does not erase the next paragraph');
+    h.route(r=>{if(r.method==='PUT'){assert.equal(r.body.body_format,'markdown-v1');h.detail.draft={...h.detail.draft,...r.body,version:2,status:'review'};return h.detail.draft;}});
+    h.$('draft-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));await tick();
+    assert.equal(h.$('body-format').value,'markdown-v1');
+    assert.equal(h.$('download').disabled,true);
+    h.detail.publication_lock=true;h.$('refresh').click();await tick();
+    const before=body.value;bold.click();assert.equal(body.value,before);assert.equal(bold.disabled,true);
+  }finally{h.close();}
+});
 
 test('approved text download uses the same approval and dirty gates as ZIP',async()=>{
   const h=await setup();try{

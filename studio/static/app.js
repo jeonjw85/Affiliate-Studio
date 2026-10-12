@@ -28,7 +28,7 @@ if (typeof document !== 'undefined') (() => {
   const field = name => $('product-form').elements.namedItem(name);
   const idPath = id => encodeURIComponent(String(id));
   const states = {review:'검토 필요',approved:'승인됨',pending:'대기 중',completed:'완료',failed:'실패',cancelled:'취소됨',uncertain:'결과 불명'};
-  const dirty = () => Boolean(detail) && ($('draft-title').value !== detail.draft.title || $('draft-body').value !== detail.draft.body);
+  const dirty = () => Boolean(detail) && ($('draft-title').value !== detail.draft.title || $('draft-body').value !== detail.draft.body || $('body-format').value !== (detail.draft.body_format || 'plain'));
   const hasErrors = () => Boolean(detail?.checks?.errors?.length);
   function message(text, error = false) { $('notice').textContent = text; $('notice').className = error ? 'notice error' : 'notice'; $('notice').hidden = !text; }
   function node(tag, text, className) { const el = document.createElement(tag); if (text != null) el.textContent = String(text); if (className) el.className = className; return el; }
@@ -62,6 +62,7 @@ if (typeof document !== 'undefined') (() => {
     $('product-fields').disabled = busy || !state.csrf || productLocked(productId);
     $('draft-fields').disabled = busy || !detail || locked || stale;
     $('save-draft').disabled = busy || !detail || !edited || stale || locked;
+    for (const el of document.querySelectorAll('[data-format]')) el.disabled = busy || !detail || stale || locked || $('body-format').value !== 'markdown-v1';
     $('approval-confirm').disabled = busy || !detail || edited || stale || productDirty || locked || hasErrors() || detail?.draft.status === 'approved';
     $('run-at').disabled = busy || !actions.schedule;
     $('reload-draft').disabled = busy || !detail;
@@ -153,9 +154,9 @@ if (typeof document !== 'undefined') (() => {
   }
   async function loadDraft(id) {
     const next=await api(`/api/drafts/${idPath(id)}`);
-    detail=next; stale=false; $('draft-title').value=detail.draft.title; $('draft-body').value=detail.draft.body; $('approval-confirm').checked=false;
+    detail=next; stale=false; $('body-format').value=detail.draft.body_format || 'plain'; $('draft-title').value=detail.draft.title; $('draft-body').value=detail.draft.body; $('approval-confirm').checked=false;
     $('content-empty').hidden=true; $('draft-workspace').hidden=false;
-    $('preview-frame').srcdoc=detail.preview?.html || '';
+    $('preview-frame').srcdoc=detail.preview?.document || detail.preview?.html || '';
     for(const name of ['text','telegram','prompt']) $('preview-'+name).textContent=detail.preview?.[name]||'';
     $('product-facts').replaceChildren();
     const p=detail.product;
@@ -241,11 +242,45 @@ if (typeof document !== 'undefined') (() => {
   });
   const onEdit=()=>{$('approval-confirm').checked=false;$('publish-confirm').checked=false;$('confirmed-send').checked=false;sync();};
   $('draft-title').addEventListener('input',onEdit);$('draft-body').addEventListener('input',onEdit);
+  $('body-format').addEventListener('change',onEdit);
+  document.querySelectorAll('[data-format]').forEach(button=>button.addEventListener('click',()=>{
+    if(button.disabled || busy || !detail || stale || draftLocked() || $('body-format').value!=='markdown-v1')return;
+    const input=$('draft-body'),value=input.value,type=button.dataset.format;
+    let start=input.selectionStart,end=input.selectionEnd,selected=value.slice(start,end),insert;
+    if(type==='bold')insert=`**${selected || '강조할 내용'}**`;
+    else if(type==='table') {
+      // Add a block after the selected line; never replace selected evidence.
+      const edge=end>start && value[end-1]==='\n'?end-1:end;
+      const next=value.indexOf('\n',edge);start=end=next<0?value.length:next;
+      const cell=s=>String(s).replace(/\\/g,'\\\\').replace(/[|*#>]/g,'\\$&').replace(/\r?\n/g,' ');
+      insert='\n\n| 항목 | 확인한 내용 |\n| --- | --- |\n'+detail.product.facts.map((f,i)=>`| 근거 ${i+1} | ${cell(f)} |`).join('\n')+'\n\n';
+    } else {
+      start=start===0?0:value.lastIndexOf('\n',start-1)+1;
+      const edge=end>start && value[end-1]==='\n'?end-1:end;
+      const next=value.indexOf('\n',edge);end=next<0?value.length:next;
+      selected=value.slice(start,end);
+      const prefix={h2:'## ',h3:'### ',list:'- ',quote:'> '};
+      insert=selected.split('\n').map((line,i)=>{
+        const content=type==='h2'||type==='h3'?line.replace(/^(?:#{2,3} )+/,''):line;
+        return (type==='ordered'?`${i+1}. `:prefix[type])+content;
+      }).join('\n');
+    }
+    if(insert===value.slice(start,end))return;
+    if(value.length-(end-start)+insert.length>20000){message('본문은 서식 기호를 포함해 20,000자까지입니다.',true);return;}
+    // Native insertion is needed for the browser's undo history. setRangeText
+    // edits the value but can leave Ctrl+Z replaying unrelated old changes.
+    const previousSelection=[input.selectionStart,input.selectionEnd,input.selectionDirection];
+    input.focus();input.setSelectionRange(start,end);
+    let inserted=false;
+    try {inserted=typeof document.execCommand==='function' && document.execCommand('insertText',false,insert);}catch{}
+    if(!inserted){input.setSelectionRange(...previousSelection);message('이 브라우저는 서식 버튼의 실행 취소를 지원하지 않습니다. 본문에 서식 문법을 직접 입력하세요.',true);return;}
+    input.setSelectionRange(start,start+insert.length);onEdit();
+  }));
   $('approval-confirm').addEventListener('change',sync);
   $('reload-draft').addEventListener('click',()=>{if(canLeaveDraft())run(()=>loadDraft(detail.draft.id),'서버 저장본을 불러왔습니다. 다시 검토하세요.');});
   $('draft-form').addEventListener('submit',event=>{
     event.preventDefault();if(!detail||!dirty()||stale||draftLocked()||busy||!$('draft-form').reportValidity())return;
-    run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}`,'PUT',{version:detail.draft.version,title:$('draft-title').value,body:$('draft-body').value});await refreshDetailAndState();},'수정본을 저장했습니다. 기존 승인이 해제되었으므로 다시 확인하세요.');
+    run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}`,'PUT',{version:detail.draft.version,title:$('draft-title').value,body:$('draft-body').value,body_format:$('body-format').value});await refreshDetailAndState();},'수정본을 저장했습니다. 기존 승인이 해제되었으므로 다시 확인하세요.');
   });
   $('approve').addEventListener('click',()=>{if($('approve').disabled)return;run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}/approve`,'POST',{version:detail.draft.version,confirmed:true});await refreshDetailAndState();},'현재 저장본을 승인했습니다.');});
   $('download').addEventListener('click',()=>{if($('download').disabled)return;run(async()=>{await download(`/api/drafts/${idPath(detail.draft.id)}/download?version=${detail.draft.version}`,`content-${detail.draft.id}.zip`);await refreshDetailAndState();},'승인본 패키지를 내려받았습니다.');});

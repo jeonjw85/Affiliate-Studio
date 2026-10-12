@@ -58,9 +58,14 @@
       <div id="draft-workspace" hidden>
         <div class="editor-status"><div><span id="draft-status" class="badge"></span><span id="dirty-status" class="muted"></span></div><button id="reload-draft" type="button" class="small">서버 저장본 다시 불러오기</button></div>
         <div class="editor-grid">
-          <section class="card"><div class="card-heading"><h2>콘텐츠 편집</h2><span class="muted">일반 텍스트</span></div><form id="draft-form"><fieldset id="draft-fields">
+          <section class="card"><div class="card-heading"><h2>콘텐츠 편집</h2><span class="muted">안전한 본문 서식</span></div><form id="draft-form"><fieldset id="draft-fields">
             <label>제목<input id="draft-title" required maxlength="200"></label>
-            <label>본문<textarea id="draft-body" rows="17" required></textarea></label>
+            <label>본문 형식<select id="body-format"><option value="plain">일반 텍스트 (기존 출력 유지)</option><option value="markdown-v1">서식 사용 (소제목·강조·목록·표)</option></select></label>
+            <div class="format-toolbar actions" role="group" aria-label="본문 서식 도구">
+              <button type="button" class="small" data-format="h2">소제목</button><button type="button" class="small" data-format="h3">작은 소제목</button><button type="button" class="small" data-format="bold">굵게</button><button type="button" class="small" data-format="list">목록</button><button type="button" class="small" data-format="ordered">순서</button><button type="button" class="small" data-format="quote">주의</button><button type="button" class="small" data-format="table">근거표</button>
+            </div>
+            <label>본문<textarea id="draft-body" rows="17" maxlength="20000" required aria-describedby="format-help"></textarea></label>
+            <details id="format-help"><summary>서식 작성 방법</summary><p class="field-help">서식 사용을 선택하고 글자를 선택한 뒤 도구를 누르세요. 직접 ## 소제목, ### 작은 소제목, **굵게**, - 목록, 1. 순서, &gt; 주의를 입력해도 됩니다. 근거표는 등록한 사실만 삽입하며, 확인한 자료가 있을 때 열을 추가해 비교표로 편집할 수 있습니다. 표는 2~8열·본문 1~40행, 모든 행의 열수가 같아야 합니다. 문법 기호를 글자로 쓰려면 앞에 역슬래시를 붙이세요. HTML·이미지·본문 링크·중첩 목록은 지원하지 않습니다. 서식을 바꾸면 저장 후 다시 승인해야 합니다.</p></details>
             <p class="field-help">가격·출처·제휴 고지는 편집 본문 밖에 유지됩니다. 상품 또는 본문 수정 시 기존 승인이 해제됩니다.</p>
             <div class="form-footer"><span class="muted">수정 후 반드시 저장하세요.</span><button type="submit" id="save-draft" class="primary">수정 저장</button></div>
           </fieldset></form></section>
@@ -150,7 +155,7 @@
         <article class="card"><span class="step">선택 사항</span><h2>WordPress 연결</h2><p>서버 환경 변수 <code>WP_URL</code>, <code>WP_USERNAME</code>, <code>WP_APP_PASSWORD</code>로 연결합니다. 애플리케이션 비밀번호는 이 화면에 입력하거나 표시하지 않습니다.</p><p>‘초안으로 전송’은 공개하지 않습니다. ‘공개 게시 예약’은 실제 외부 공개를 예약합니다. 원격 예약은 PC 종료 후에도 유지되며 WordPress cron에 따라 지연될 수 있습니다. 연결하지 않아도 상품·콘텐츠·ZIP 기능을 사용할 수 있습니다.</p></article>
       </div>
     </section>
-    <footer>제휴 콘텐츠 작업대 v0.3 <span>사실 확인 → 후보 검토 → 직접 승인 → ZIP 또는 WordPress 공개 예약</span></footer>
+    <footer>제휴 콘텐츠 작업대 v0.4.1 <span>사실 확인 → 후보 검토 → 직접 승인 → ZIP 또는 WordPress 공개 예약</span></footer>
   </main>
 </body>
 </html>

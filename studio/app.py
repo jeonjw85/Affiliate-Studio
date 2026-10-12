@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .core import Store, VersionConflict
 from .wordpress import WordPress
 from .ai import LocalAI
+from .article_document import CSS_HASH
 
 
 STATIC = Path(__file__).parent / 'static'
@@ -99,9 +100,13 @@ def create_app(data_dir=None):
         response.headers.update({
             'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff',
             'Referrer-Policy':'no-referrer', 'X-Frame-Options':'DENY',
-            'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+            'Content-Security-Policy':f"default-src 'self'; script-src 'self'; style-src 'self' '{CSS_HASH}'; img-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
         })
         return response
+
+    @app.get('/favicon.ico', include_in_schema=False)
+    async def favicon():
+        return Response(status_code=204)
 
     @app.get('/api/state')
     def state():
@@ -150,7 +155,7 @@ def create_app(data_dir=None):
 
     @app.put('/api/drafts/{id}')
     def edit(id: str, body: dict):
-        return store.edit_draft(id, body.get('version'), body.get('title'), body.get('body'))
+        return store.edit_draft(id, body.get('version'), body.get('title'), body.get('body'), body.get('body_format'))
 
     @app.post('/api/drafts/{id}/approve')
     def approve(id: str, body: dict):
