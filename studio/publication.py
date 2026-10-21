@@ -5,6 +5,13 @@ from datetime import timedelta
 from .core import now, timestamp, VersionConflict
 
 
+PROCESS_OWNER = uuid.uuid4().hex
+
+
+def process_owner():
+    return {'_pid': os.getpid(), '_owner': PROCESS_OWNER}
+
+
 def public(record):
     return {k: v for k, v in record.items() if not k.startswith('_')}
 
@@ -14,6 +21,10 @@ def owner_alive(record):
     # second remote mutation. Dead process recovery requires explicit refresh.
     pid = record.get('_pid')
     if type(pid) is not int or pid <= 0: return True
+    # Container restarts commonly reuse this PID; an instance token distinguishes
+    # the previous process from a live claim in the current single-process app.
+    if pid == os.getpid() and record.get('_owner'):
+        return record['_owner'] == PROCESS_OWNER
     try:
         os.kill(pid, 0)
         return True
@@ -74,7 +85,7 @@ def schedule(store, id, version, run_at, confirmed, client):
         record = dict(id=uuid.uuid4().hex, draft_id=id, version=version, target=client.url,
                       remote_id=delivery['remote_id'], remote_url=delivery.get('remote_url'),
                       run_at=due.isoformat(), state='sending', error='', created_at=now().isoformat(),
-                      checked_at=None, _claim=claim, _pid=os.getpid(), _draft=d, _product=p)
+                       checked_at=None, _claim=claim, _draft=d, _product=p, **process_owner())
         store.put(c, 'publication', record)
     try:
         before = client.verify(client.read(record['remote_id']), d, p)
@@ -101,7 +112,7 @@ def reconcile(store, id, client, cancel=False, confirmed=False):
             raise VersionConflict('원격 작업 진행 중: 완료 후 조회 필요')
         claim = uuid.uuid4().hex
         record['_claim'] = claim
-        record['_pid'] = os.getpid()
+        record.update(process_owner())
         store.put(c, 'publication', record)
     try:
         state = classify(client, record, client.read(record['remote_id']))

@@ -24,11 +24,14 @@ class WordPress:
         self.username = text(username, 200)
         self.password = text(password, 300)
 
-    def request(self, method, suffix, payload=None):
+    def request(self, method, suffix, payload=None, *, params=None):
+        query = dict(params or {})
+        if method == 'GET':
+            query['context'] = 'edit'
         with httpx.Client(auth=(self.username, self.password), timeout=15,
                           follow_redirects=False, trust_env=False) as client:
             with client.stream(method, self.url + '/wp-json/wp/v2/posts' + suffix,
-                               json=payload, params={'context': 'edit'} if method == 'GET' else None) as response:
+                               json=payload, params=query or None) as response:
                 if response.status_code not in ((200,) if method == 'GET' else (200, 201)):
                     raise ValueError('WordPress 응답 확인 불가')
                 raw = bytearray()
@@ -43,6 +46,14 @@ class WordPress:
         data = self.request('GET', '/' + str(id))
         if not isinstance(data, dict) or type(data.get('id')) is not int or data['id'] != id:
             raise ValueError('원격 글 ID 불일치')
+        return data
+
+    def verify_snapshot(self, data, snapshot):
+        """Compare a raw read-back with an automatic immutable snapshot."""
+        if (normalize(data.get('title', {}).get('raw')) != normalize(snapshot['title'])
+                or normalize(data.get('content', {}).get('raw')) != normalize(snapshot['html'])
+                or DISCLOSURES[snapshot['provider']] not in data.get('content', {}).get('raw', '')):
+            raise ValueError('원격 제목·본문·광고 표시가 자동 발행 스냅샷과 다름')
         return data
 
     def verify(self, data, draft, product):

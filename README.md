@@ -1,30 +1,46 @@
 # Affiliate Studio
 
-제휴 콘텐츠 작성과 WordPress 예약 발행을 관리하는 개인용 로컬 서비스
+제휴 콘텐츠 작성과 WordPress 예약 발행을 관리하는 개인용 PC·NAS 서비스
 
 버전 0.4.1
 
-상품 정보와 본인 제휴 링크를 등록하고, 템플릿이나 로컬 AI로 초안 작성
-내용을 직접 검토하고 승인한 뒤 WordPress로 전송하거나 HTML, TXT, ZIP으로 저장
+Telegram으로 본인 제휴 링크를 보내면 글을 작성해 WordPress에 예약할 수 있음
+상품을 직접 등록하고, 템플릿이나 AI 후보를 검토·승인한 뒤 전송하는 수동 경로도 유지
 
 ## 기능
 
-- 상품 정보, 출처, 제휴 링크 등록
-- 템플릿 초안과 로컬 AI 후보 작성, 비교, 적용
+- Telegram으로 본인 제휴 링크를 보내 글 작성, WordPress 예약, 결과 알림
+- 상품 정보, 출처, 제휴 링크 수동 등록
+- 쿠팡 파트너스·토스 쉐어링크 API 링크 발급 (선택, 키와 승인 필요)
+- 템플릿 초안과 로컬 AI·외부 API 후보 작성, 비교, 적용
 - 소제목, 강조, 목록, 표 편집
 - 버전별 검토와 승인
 - WordPress 비공개 초안 전송과 공개 예약
 - 채널별 조회, 클릭, 주문, 수수료 수익, 비용 수동 기록
 
-제휴 가입, 링크 발급, 상품 수집, 사이트 개설, 성과 수집은 자동화하지 않음
+제휴 가입, 상품 목록 수집, 사이트 개설, 성과 수집은 자동화하지 않음
 토스 등 각 제휴 서비스의 외부 게시 조건은 직접 확인 필요
 
-AI 후보는 자동 적용, 승인, 게시하지 않음
+수동 화면의 AI 후보는 자동 적용, 승인, 게시하지 않음
+Telegram 자동 운영은 그 화면과 별개로, 설정한 작성 규칙 검사 후 WordPress에 예약함
+자동 운영을 켜려면 쿠팡 또는 토스 하루 편수 중 하나 이상이 필요함
 WordPress 공개 예약은 실제 외부 게시 예약이며, 로컬 ZIP 생성 예약과 별개
 
 ## 실행
 
-Python 3.11 권장
+Python 3.11 이상 필요
+
+처음에는 `.env.example`을 `.env`로 복사하고 필요한 연결 정보 입력
+이미 `.env`가 있다면 해당 파일을 수정
+
+```sh
+cp .env.example .env
+```
+
+프로젝트 폴더의 `.env`는 실행 시 자동 로드하며, 터미널에서 지정한 환경변수가 우선
+공백·`#`·`$`가 있는 값은 작은따옴표로 감싸기, 예: `WP_APP_PASSWORD='abcd efgh ijkl'`
+파일의 값은 셸 명령으로 실행하지 않으며 직접 실행 시 `${변수}` 치환도 하지 않음
+설정 변경 후 앱 재시작 필요
 
 ```sh
 sh start.sh
@@ -34,15 +50,178 @@ sh start.sh
 
 - 첫 실행 시 가상환경과 의존성 설치를 위한 인터넷 연결 필요
 - AI와 WordPress 미연결 상태에서도 상품 등록, 템플릿, 검토, ZIP 사용 가능
-- 로컬 접속만 허용, 인터넷 공개 서버나 공용 PC용 인증 기능 없음
+- 직접 실행은 기본적으로 로컬 접속, NAS 운영은 아래 Docker 설정 사용
+- 로그인 기능이 없는 개인용 서비스로, 신뢰하는 개인 네트워크에서 운영
 - Mac Safari와 사용자 WordPress 사이트는 별도 검증 필요
 
-## 로컬 AI
+## Docker로 NAS·개인 서버 운영
+
+Docker Engine과 Docker Compose 필요, Python·Node를 서버에 별도로 설치할 필요 없음
+
+1. 프로젝트 폴더에서 `.env.example`을 `.env`로 복사
+2. `.env`의 `STUDIO_ALLOWED_HOSTS`에 브라우저에서 사용할 실제 NAS IP 또는 호스트명 입력
+3. 필요한 AI·WordPress 설정 후 실행
+
+```dotenv
+STUDIO_ALLOWED_HOSTS=192.168.1.20,nas.local
+STUDIO_PORT=8787
+```
+
+`192.168.1.20`은 예시이므로 본인 NAS 주소로 변경, URL·포트·와일드카드는 입력하지 않음
+
+```sh
+docker compose up -d --build
+```
+
+접속: `http://192.168.1.20:8787` 또는 `http://nas.local:8787`
+컨테이너는 내부에서 `0.0.0.0:8787`로 수신하며, 지정한 호스트의 요청만 허용
+포트는 `STUDIO_PORT`로 변경 가능, NAS 방화벽에서도 해당 포트 접근 허용 필요
+기존 Origin·CSRF 검증은 NAS에서도 적용
+
+### 설정 반영·상태 확인·종료
+
+```sh
+# .env 변경 반영 (환경변수 변경은 restart 대신 up 사용)
+docker compose up -d
+# 상태와 실행 로그
+docker compose ps
+docker compose logs --tail=100 studio
+# 종료, 데이터 볼륨 유지
+docker compose down
+```
+
+Docker 서비스가 켜지면 `unless-stopped` 정책으로 자동 재시작
+수동으로 중지한 컨테이너는 `docker compose up -d`로 다시 실행
+
+### 데이터 보존
+
+SQLite와 ZIP은 `studio_data` 볼륨의 `/app/data`에 저장
+하나의 데이터 볼륨에는 앱 컨테이너 한 개만 연결해 운영
+컨테이너 재생성·이미지 업데이트·일반 `down` 후에도 유지되며, 호스트의 기존 `data/`와는 별도 저장소
+`docker compose down -v`는 데이터 볼륨도 삭제하므로 데이터 유지 시 사용하지 않음
+프로젝트 폴더 이름이나 Compose 프로젝트 이름을 바꾸면 다른 볼륨을 사용할 수 있음
+
+백업은 앱을 잠시 중지한 뒤 복사:
+
+```sh
+docker compose stop studio
+docker compose cp studio:/app/data ./data-backup
+docker compose start studio
+```
+
+`.env`는 이미지·배포 ZIP·Git에 포함되지 않으므로 별도 보관
+
+### Docker에서 로컬 AI 함께 실행
+
+`.env`에 아래 값 입력:
+
+```dotenv
+AI_MODE=local
+AI_BASE_URL=http://ollama:11434/v1
+AI_MODEL=qwen3:4b-instruct-2507-q4_K_M
+AI_LOCAL_HOSTS=ollama,host.docker.internal
+```
+
+```sh
+docker compose --profile local-ai up -d --build
+docker compose exec ollama ollama pull qwen3:4b-instruct-2507-q4_K_M
+```
+
+모델은 `ollama_data` 볼륨에 저장, Ollama 포트는 Docker 내부에서만 사용
+기본 구성은 CPU 실행이며 NAS의 메모리와 CPU에 따라 생성 속도가 달라짐
+외부 API 모드는 Ollama 컨테이너나 모델 다운로드 없이 사용 가능
+
+이미 실행 중인 모델 서버에 연결하려면 `AI_BASE_URL`을 해당 서버 주소로 지정하고
+호스트명을 `AI_LOCAL_HOSTS`에 추가 (예: `192.168.1.30`)
+호스트의 Ollama는 `http://host.docker.internal:11434/v1` 사용 가능하나, 모델 서버도 Docker에서 접근 가능한 주소로 수신해야 함
+
+## 제휴 링크 자동 발급
+
+상품 화면에서 서비스 선택 → 원본 상품 URL 입력 → `제휴 링크 생성` → 링크 확인 후 상품 저장
+저장한 링크는 콘텐츠 미리보기와 내보내기, WordPress 본문에 반영
+API 설정 전에도 기존 제휴 링크를 직접 입력해 사용 가능
+
+### API 설정
+
+앱을 실행할 터미널에서 설정한 뒤 앱 재시작
+아래 `read` 명령은 Bash/Zsh 기준이며, 각 명령 실행 후 해당 값을 붙여넣고 Enter 입력 (화면에 표시되지 않음)
+
+**쿠팡 파트너스** — API 사용 권한과 Access Key / Secret Key 필요
+
+```sh
+read -r -s COUPANG_ACCESS_KEY
+read -r -s COUPANG_SECRET_KEY
+export COUPANG_ACCESS_KEY COUPANG_SECRET_KEY
+```
+
+**토스 쉐어링크** — 쉐어링크 Open API 승인 후 크리에이터 어드민의 `연동 → API 키 발급`에서 확인
+셀러용 키와 다른 쉐어링크용 Access Key / Secret Key 및 **회원 연동 ID**(`publisherId`, UUID) 필요
+
+```sh
+read -r -s TOSS_ACCESS_KEY
+read -r -s TOSS_SECRET_KEY
+read -r -s TOSS_PUBLISHER_ID
+export TOSS_ACCESS_KEY TOSS_SECRET_KEY TOSS_PUBLISHER_ID
+sh start.sh
+```
+
+쿠팡만 설정했다면 쿠팡 환경변수 설정 후 `sh start.sh`로 실행
+인증정보는 서버 환경변수로만 사용하며 브라우저나 상품 DB에 저장하지 않음
+토스 토큰은 앱 프로세스 메모리에서 만료 전까지 재사용, 재시작 후 첫 발급에서 다시 요청
+화면의 `API 설정됨`은 인증 성공을 뜻하지 않으며 실제 발급 결과로 확인
+
+토스에는 **앱 서버의 고정 출발지 공인 IP**를 등록해야 함
+PC에서 앱을 실행한다면 그 PC의 외부 통신에 사용되는 공인 IP 기준이며 `127.0.0.1`이나 내부 IP가 아님
+2026-10-19 확인한 공식 안내 기준으로 토스 신규 API 신청은 일시 중단 상태, 기존 승인 계정은 이용 가능
+
+### 지원하는 원본 URL
+
+| 서비스 | 자동 발급 입력 | 처리 |
+| --- | --- | --- |
+| 쿠팡 | `https://www.coupang.com/vp/products/상품ID` | `itemId`, `vendorItemId` 등 쿼리를 유지해 딥링크 API에 전달 |
+| 토스 | `https://toss.shopping/t/상품ID` | 경로의 상품 그룹 ID(`tacaId`)로 대표 옵션의 쉐어링크 발급 |
+
+단축 공유 링크나 다른 주소 형식은 원본 상품 상세 주소로 입력
+토스 URL 쿼리는 옵션 선택에 사용하지 않으며, 대표 옵션은 발급 시점에 따라 달라질 수 있음
+발급된 링크는 상품에 저장해 재사용, 생성 버튼을 누를 때만 외부 API 호출
+생성하거나 저장한 상품의 URL·서비스를 바꾸면 연결된 이전 링크와 확인 체크를 초기화, 새 링크 입력 후 다시 저장
+인증·IP·한도·통신 오류는 화면에 표시하며 실패 시 입력 중인 제휴 URL 유지
+
+검증은 공식 명세 기반 모의 HTTP 응답과 화면 동작 테스트 기준, 실제 계정 발급은 키와 승인 설정 후 별도 확인 필요
+공식 문서: [쿠팡 파트너스 API](https://partners.coupang.com/#help/open-api) · [토스 연동 시작](https://sharelink-docs.toss.im/developers/open-api/auth) · [토스 링크 발급](https://sharelink-docs.toss.im/developers/open-api/api/link)
+
+## AI 모드 선택
+
+`.env`의 `AI_MODE`로 `local` 또는 `api` 선택, `AI_MODEL`이 비어 있으면 AI 없이 기본 기능 사용
+두 모드 모두 콘텐츠 화면의 `AI 연결 확인` 후 표시된 대상에 저장본 전송을 동의하고 후보 생성
+
+### 외부 OpenAI 호환 API
+
+`.env` 설정 예시:
+
+```dotenv
+AI_MODE=api
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-4.1-mini
+AI_API_KEY='본인-API-키'
+```
+
+다른 OpenAI 호환 서비스는 해당 서비스의 기본 URL·모델·키로 변경
+HTTPS와 Bearer 인증, `/models`, `/chat/completions`, `response_format=json_schema` 지원 필요
+`max_tokens`와 `temperature`를 지원하는 Chat Completions 모델 사용
+API 키는 서버 요청의 인증 헤더에만 사용하며 브라우저·상품 DB·프롬프트로 전달하지 않음
+자료는 설정한 외부 서비스로 전송되고 서비스 이용 요금이 적용
+실제 API 접근 권한·모델 호환성·요금은 사용 서비스에서 확인
+
+잘못된 모드나 연결 실패 시 다른 서버·모드로 자동 대체하지 않음
+직접 실행은 앱 재시작, Docker는 `docker compose up -d`로 설정 반영
+
+### 로컬 AI
 
 외부 유료 AI API와 API 키 없이 컴퓨터에서 모델 실행
 모델 다운로드, 메모리, 전력은 별도 필요
 
-### Ollama 설정
+#### Ollama 설정
 
 [Ollama](https://ollama.com/download) 설치 후 모델 다운로드
 
@@ -60,23 +239,23 @@ OLLAMA_NO_CLOUD=1 OLLAMA_CONTEXT_LENGTH=4096 OLLAMA_NUM_PARALLEL=1 ollama serve
 `OLLAMA_NO_CLOUD=1`은 이미 실행 중인 프로세스에 소급 적용되지 않음
 [공식 FAQ](https://docs.ollama.com/faq)에 따라 설정 후 로그의 `Ollama cloud disabled: true` 확인
 
-Affiliate Studio는 알려진 `:cloud`, `-cloud` 모델 태그를 거부
+로컬 모드에서는 알려진 `:cloud`, `-cloud` 모델 태그를 거부
 임의의 로컬 프록시가 외부로 자료를 전달하는지까지 검증하지는 않음
 
-앱을 실행할 터미널에서 연결 설정
+`.env`에 연결 설정
 
-```sh
-export AI_BASE_URL='http://127.0.0.1:11434/v1'
-export AI_MODEL='qwen3:4b-instruct-2507-q4_K_M'
-export AI_TIMEOUT_SECONDS='180'
-sh start.sh
+```dotenv
+AI_MODE=local
+AI_BASE_URL=http://127.0.0.1:11434/v1
+AI_MODEL=qwen3:4b-instruct-2507-q4_K_M
+AI_TIMEOUT_SECONDS=180
 ```
 
 콘텐츠 화면의 `AI 연결 확인` 후 저장본 전송에 동의하고 후보 생성
 모델 설정 변경 시 앱 재시작 필요
 
 서버 요구사항
-- 루프백 OpenAI 호환 `/v1/models`, `/v1/chat/completions`
+- 루프백 또는 `AI_LOCAL_HOSTS`에 지정한 서버의 OpenAI 호환 `/v1/models`, `/v1/chat/completions`
 - JSON Schema 응답 형식 지원
 - 외부 유료 API로 자동 대체하지 않음
 
@@ -94,7 +273,7 @@ Ollama 설정은 공식 API와 모델 배포에 근거한 안내이며 Ollama �
 
 ### 전송 자료
 
-상품명, 확인한 사실, 대상 독자, 주의사항, 현재 제목과 본문, 작성 유형을 로컬 모델로 전송
+상품명, 확인한 사실, 대상 독자, 주의사항, 현재 제목과 본문, 작성 유형을 선택한 로컬 모델 또는 외부 API로 전송
 구조화된 제휴 URL, WordPress 비밀번호, 환경 변수는 전송 대상에서 제외
 자유 입력란에 적은 내용은 전송될 수 있으므로 비밀번호 입력 금지
 
@@ -108,26 +287,67 @@ AI의 근거 번호는 사실 확인의 증거가 아니며 결과 검토 필요
 
 검증 가능한 HTTPS 사이트 기본 주소만 허용하며 리다이렉트는 따르지 않음
 
-앱 실행 터미널에서 설정
-아래 비밀번호 입력 명령은 Bash 또는 Zsh 기준
+`.env`에 설정
 
-```sh
-export WP_URL='https://본인-사이트.example'
-export WP_USERNAME='본인-사용자명'
-# 다음 명령 후 애플리케이션 비밀번호 직접 입력, 화면에는 표시되지 않음
-read -r -s WP_APP_PASSWORD
-export WP_APP_PASSWORD
-sh start.sh
+```dotenv
+WP_URL=https://본인-사이트.example
+WP_USERNAME=본인-사용자명
+WP_APP_PASSWORD='발급받은 애플리케이션 비밀번호'
 ```
 
 비밀번호를 채팅, Git, 스크린샷에 남기지 않도록 주의
-모델 서버가 아닌 앱 실행 터미널에 환경 변수 설정 필요
+설정 변경 후 앱 재시작 또는 `docker compose up -d` 필요
 화면의 `설정됨`은 연결 성공을 뜻하지 않으며 실제 초안 전송 결과 확인 필요
+
+## Telegram 자동 운영
+
+Telegram으로 본인 제휴 링크를 보내면 상품 정보를 확인하고, 필요한 설명을 답장으로 받아
+글 작성·검사·WordPress 예약 발행까지 처리하는 자동 운영 기능
+
+### 준비
+
+1. Telegram에서 `@BotFather`로 개인 봇을 만들고 봇 토큰 확인
+2. 만든 봇과 개인 대화를 시작한 뒤 `/start` 전송
+3. `.env`에 봇 토큰과 내 개인 채팅 ID, 사용자 ID 입력
+
+```dotenv
+TELEGRAM_BOT_TOKEN=123456789:발급받은-봇-토큰
+TELEGRAM_CHAT_ID=내-개인-채팅-ID
+TELEGRAM_ALLOWED_USER_ID=내-사용자-ID
+```
+
+등록한 사용자와 개인 대화만 처리하며 다른 사람의 링크는 작업을 만들지 않음
+봇은 외부 수신 주소 없이 앱이 직접 새 메시지를 가져오는 방식을 사용
+같은 봇 토큰에 webhook이 설정돼 있으면 연결 오류로 표시
+설정 변경 후 앱 재시작 또는 `docker compose up -d` 필요
+
+### 사용
+
+- 개인 봇 대화에 본인 계정으로 발급한 쿠팡·토스 제휴 링크 전송
+- 상품 정보를 읽을 수 없거나 부족하면 봇이 상품명·특징 설명을 요청
+- 봇 질문에 **답장**으로 `상품명:`, `특징:`, `가격:`, `대상:` 형식 입력
+- `/start`는 사용 방법, `/status`는 대기·정보 요청·예약·발행 현황 안내
+
+쿠팡·토스 링크 발급 API 없이 동작하며, 게시글에는 보낸 제휴 링크를 그대로 사용
+자동 운영 화면에서 쿠팡·토스의 하루 편수와 발행 시간 범위를 각각 설정
+링크가 부족하면 받은 만큼만 처리하며, 남은 링크는 다음 발행일로 넘어감
+
+접수, 정보 요청, 예약 확인, 실제 공개 확인, 실패·지연을 같은 봇 대화로 알림
+예약 성공은 발행 완료가 아니며, WordPress에서 실제 공개를 확인한 뒤 완료로 표시
+알림 전송 실패는 글을 다시 발행하지 않고 별도로 재시도
+WordPress 연결이 끊긴 채 전송되면 결과 불명으로 남고 글을 다시 만들지 않음
+실패한 요청은 같은 제휴 링크를 다시 보내 재접수 가능
+
+자동 글은 텍스트·목록·표·제휴 링크 중심이며 이미지 수집·업로드는 하지 않음
+자동 글은 1,200~2,000자까지 쓸 수 있어 로컬 AI는 `OLLAMA_CONTEXT_LENGTH=16384` 권장
+자동 작성은 기존 수동 AI와 같은 `AI_DAILY_LIMIT`를 함께 사용하며, 한도가 없으면 링크는 대기 상태로 남음
+Docker는 `.env`의 `OLLAMA_CONTEXT_LENGTH` 값으로 조정, 메모리 여유 필요
+실제 계정 발행 전에는 테스트 WordPress에서 먼저 확인 필요
 
 ## 작성과 발행
 
 1. 상품명, 확인한 사실, 출처, 본인 제휴 URL, 대상 독자, 주의사항 입력
-2. `초안 만들기`로 템플릿 생성, 필요하면 로컬 AI 후보 작성
+2. `초안 만들기`로 템플릿 생성, 필요하면 선택한 AI로 후보 작성
 3. 저장본과 후보를 비교하고 원하는 후보만 적용
 4. 사실, 표현, 광고 고지, 제휴 조건 검토 후 `현재 버전 승인`
 5. `WordPress 초안으로 전송` 후 원격 제목, 본문, 고지, `draft` 상태 확인
@@ -270,7 +490,7 @@ CSV 자동 가져오기와 복원은 미지원
 
 | 작업 | 실행 조건 |
 | --- | --- |
-| AI 후보 작성 | 앱과 로컬 모델 실행 필요 |
+| AI 후보 작성 | 앱 실행과 선택한 모델 서버/API 연결 필요 |
 | 로컬 ZIP 생성 예약 | 앱 실행 필요 |
 | WordPress에서 확인된 공개 예약 | 앱 종료 후에도 WordPress에 유지 |
 
@@ -299,13 +519,19 @@ Affiliate Studio는 WordPress cron을 설치하거나 운영하지 않음
 ```sh
 .venv/bin/python -m pytest -q
 npm ci
-node --test tests/v02-actions.cjs tests/v02-dom.cjs tests/v03-metrics.cjs tests/ui-copy.cjs
+node --test tests/v02-actions.cjs tests/v02-dom.cjs tests/v03-metrics.cjs tests/ui-copy.cjs tests/affiliate-dom.cjs
 # Playwright 브라우저 설치 또는 CHROMIUM_PATH 지정 후 실행
 npm run test:e2e
 node tests/e2e_v03.mjs
 node tests/e2e_v04.mjs
 node tests/e2e_copy.mjs
+# Docker가 실행 중일 때: 임시 프로젝트·볼륨과 합성 AI 서버로 검증
+.venv/bin/python tests/docker_smoke.py
 ```
+
+Docker 검증은 이미지 빌드, NAS 호스트 제한, 내부 AI 통신, ZIP 다운로드,
+컨테이너 재생성 후 데이터 유지와 중단 작업 복구를 확인한 뒤 시험 리소스 정리
+외부 API는 모의 HTTP 응답으로 인증 헤더·생성·오류 처리를 검증하며, 실제 유료 호출은 별도 연결 설정 후 확인
 
 선택적 실모델 연동 검증: `tests/live_v02_probe.py`
 브라우저 v0.2 연동 검증: `tests/serve_v02_fixture.py`, `tests/e2e_v02.mjs`

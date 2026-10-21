@@ -1,0 +1,9 @@
+# Runtime sources only; credentials and local data never enter the build context
+**
+!requirements.lock
+!run.py
+!studio/
+!studio/**
+**/__pycache__/
+**/*.pyc
+**/.env*

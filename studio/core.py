@@ -144,6 +144,7 @@ class Store:
         return reconcile(self, id, client, cancel=True, confirmed=confirmed)
 
     def wordpress_draft(self, id, version, confirmed, client):
+        from .publication import process_owner
         if confirmed is not True or client is None:
             raise ValueError('WordPress 연결 설정과 외부 초안 전송 확인 필요')
         with self.connect() as c:
@@ -154,7 +155,7 @@ class Store:
             old = next((x for x in self.rows(c, 'delivery') if x['draft_id'] == id and x['version'] == version and x['target'] == client.url), None)
             if old:
                 return old
-            result = dict(id=uuid.uuid4().hex, draft_id=id, version=version, target=client.url, state='sending', error='', created_at=now().isoformat(), _pid=os.getpid())
+            result = dict(id=uuid.uuid4().hex, draft_id=id, version=version, target=client.url, state='sending', error='', created_at=now().isoformat(), **process_owner())
             self.put(c, 'delivery', result)
         try:
             result.update(client.create(d, p), state='completed')
@@ -272,20 +273,20 @@ class Store:
             raise VersionConflict('원격 전송 또는 공개 예약 잠김: 먼저 취소하거나 상태 확인 필요')
 
     def generate_ai(self, id, version, style, confirmed, client):
+        from .publication import process_owner
         if confirmed is not True or client is None:
-            raise ValueError('로컬 AI 연결 설정과 자료 전송 확인 필요')
+            raise ValueError('AI 연결 설정과 자료 전송 확인 필요')
         with self.connect() as c:
             d = self.get(c, id, 'draft'); self.assert_version(d, version)
             self.assert_unlocked(c, id)
             p = self.get(c, d['product_id'], 'product')
             source = client.source(d, p, style)
             operations = [x for x in self.rows(c, 'operation') if x.get('type') == 'ai']
-            if any(x['draft_id'] == id and x['state'] == 'running' for x in operations):
+            if any(x.get('draft_id') == id and x['state'] == 'running' for x in operations):
                 raise VersionConflict('AI 생성이 이미 진행 중')
-            if sum(x['created_at'][:10] == now().date().isoformat() for x in operations) >= client.daily_limit:
-                raise ValueError('오늘의 AI 실행 한도 소진 (실패한 시도도 포함)')
-            op = dict(id=uuid.uuid4().hex, type='ai', draft_id=id, source_version=version,
-                      product_version=p['version'], state='running', created_at=now().isoformat(), _pid=os.getpid())
+            from .ai import reserve_ai_operation
+            op = reserve_ai_operation(self, c, id, client.daily_limit, now(), scope='manual')
+            op.update(draft_id=id, source_version=version, product_version=p['version'])
             self.put(c, 'operation', op)
         try:
             generated = client.generate(source, len(p['facts']))
