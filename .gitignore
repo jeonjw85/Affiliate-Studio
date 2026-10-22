@@ -4,6 +4,7 @@ data/
 artifacts/
 dist/
 .env*
+!.env.example
 __pycache__/
 .pytest_cache/
 *.pyc

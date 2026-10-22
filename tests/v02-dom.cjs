@@ -126,6 +126,31 @@ test('refresh renders fresh review errors and badge without losing unsaved edito
   }finally{h.close();}
 });
 
+test('AI mode and endpoint changes show the destination and clear prior consent and checks',async()=>{
+  const h=await setup();try{
+    assert.match(h.$('ai-heading').textContent,/로컬 AI/);
+    h.$('ai-check').click();await tick();
+    h.$('confirmed-send').checked=true;h.$('confirmed-send').dispatchEvent(new h.w.Event('change'));
+    assert.equal(h.$('ai-generate').disabled,false);
+    Object.assign(h.state.connections,{ai_mode:'api',ai_base_url:'https://api.example.test/v1'});
+    h.$('refresh').click();await tick();
+    assert.match(h.$('ai-heading').textContent,/외부 API/);
+    assert.ok(h.$('ai-destination').textContent.includes('https://api.example.test/v1'));
+    assert.match(h.$('confirmed-send').closest('label').textContent,/외부 API.*전송.*동의/);
+    assert.equal(h.$('confirmed-send').checked,false);
+    assert.equal(h.$('ai-generate').disabled,true);
+    assert.match(h.$('ai-status').textContent,/연결 미확인/);
+    h.$('ai-check').click();await tick();
+    h.$('confirmed-send').checked=true;h.$('confirmed-send').dispatchEvent(new h.w.Event('change'));
+    assert.equal(h.$('ai-generate').disabled,false);
+    h.state.connections.ai_base_url='https://other.example.test/v1';
+    h.$('refresh').click();await tick();
+    assert.equal(h.$('confirmed-send').checked,false);
+    assert.equal(h.$('ai-generate').disabled,true);
+    assert.equal(h.requests.filter(r=>r.url.endsWith('/ai')).length,0);
+  }finally{h.close();}
+});
+
 test('explicit AI connection/generation, safe comparison and apply require new review',async()=>{
   const h=await setup(); try {
     assert.ok(h.$('ai-check'),'explicit local AI check control is present');

@@ -10,6 +10,7 @@ if (typeof document !== 'undefined') (() => {
   const $ = id => document.getElementById(id);
   let state = {products:[], drafts:[], jobs:[], connections:{wordpress:false}}, detail = null;
   let productId = null, productVersion = null, productDirty = false, busy = false, stale = false, aiCheck = null;
+  let affiliateBinding = null;
   const gates = new WeakMap();
   const activePublication = p => ['sending','future','uncertain'].includes(p.state);
   const draftLocked = () => Boolean(detail?.publication_lock || detail?.draft.publication_lock || (state.publications || []).some(p => p.draft_id === detail?.draft.id && activePublication(p)));
@@ -60,6 +61,12 @@ if (typeof document !== 'undefined') (() => {
     for (const name of ['approve','download','schedule','wordpress']) $(name).disabled = !actions[name];
     $('download-text').disabled = !actions.download;
     $('product-fields').disabled = busy || !state.csrf || productLocked(productId);
+    const affiliate = state.connections?.affiliate?.[field('provider').value];
+    $('generate-affiliate').disabled = busy || !state.csrf || productLocked(productId) || !affiliate?.configured || !field('source_url').value.trim();
+    $('affiliate-status').textContent = affiliate?.configured ? 'API 설정됨 · 실제 발급 미확인' : affiliate?.error || 'API 미설정 · 시작하기에서 설정 방법 확인';
+    $('affiliate-help').textContent = field('provider').value === 'toss'
+      ? '자동 발급: https://toss.shopping/t/상품ID · 대표 옵션으로 발급, 단축 링크는 원본 상품 주소로 입력'
+      : '자동 발급: https://www.coupang.com/vp/products/상품ID · 옵션 쿼리 유지, 단축 링크는 원본 상품 주소로 입력';
     $('draft-fields').disabled = busy || !detail || locked || stale;
     $('save-draft').disabled = busy || !detail || !edited || stale || locked;
     for (const el of document.querySelectorAll('[data-format]')) el.disabled = busy || !detail || stale || locked || $('body-format').value !== 'markdown-v1';
@@ -75,9 +82,13 @@ if (typeof document !== 'undefined') (() => {
     $('publish-schedule').disabled = !actions.wordpress || cancelledVersion || !$('publish-confirm').checked;
     $('publish-target').textContent = `대상 사이트: ${targetLabel()} · 콘텐츠: ${detail?.draft.title || '선택 없음'} · 버전 ${detail?.draft.version || '-'}`;
     $('publish-timezone').textContent = `입력 시간대: ${Intl.DateTimeFormat().resolvedOptions().timeZone} · 확인 창에 현지 시각과 UTC 표시`;
-    $('ai-status').textContent = !state.connections?.ai ? `로컬 AI 미설정 · 시작하기에서 설정 방법 확인 ${state.connections?.ai_error || ''}` : aiCheck ? (aiCheck.available ? `연결 확인됨 · ${aiCheck.model || state.connections.ai_model} · ${dateText(aiCheck.checked_at)} (마지막 조회 결과)` : `연결 확인 실패 · ${aiCheck.error || '로컬 서버와 모델 확인 필요'}`) : `설정됨 · 연결 미확인 · 모델 ${state.connections.ai_model || '미확인'}`;
+    const aiLabel = state.connections?.ai_mode === 'api' ? '외부 API' : '로컬 AI';
+    $('ai-heading').textContent = `${aiLabel} 후보 비교`;
+    $('ai-destination').textContent = `전송 대상: ${state.connections?.ai_base_url || '미설정'}${state.connections?.ai_mode === 'api' ? ' · 외부 서비스로 자료 전송, 이용 요금은 서비스 기준' : ''}`;
+    $('ai-send-label').textContent = `현재 저장본을 설정된 ${aiLabel}에 전송하는 데 동의`;
+    $('ai-status').textContent = !state.connections?.ai ? `${aiLabel} 미설정 · 시작하기에서 설정 방법 확인 ${state.connections?.ai_error || ''}` : aiCheck ? (aiCheck.available ? `연결 확인됨 · ${aiCheck.model || state.connections.ai_model} · ${dateText(aiCheck.checked_at)} (마지막 조회 결과)` : `연결 확인 실패 · ${aiCheck.error || '서버와 모델 확인 필요'}`) : `설정됨 · 연결 미확인 · 모델 ${state.connections.ai_model || '미확인'}`;
     $('dirty-status').textContent = locked ? '공개 예약/전송 잠금 · WordPress에서 예약 관리 후 앱의 원격 상태 조회 필요' : stale ? '서버 버전 충돌 · 저장본 다시 불러오기 필요' : edited ? '저장하지 않은 수정 · 승인과 내보내기 잠금' : detail ? `저장된 버전 ${detail.draft.version}` : '';
-    $('wordpress-note').textContent = state.connections?.wordpress ? 'WordPress 설정됨 · 초안 전송은 공개 게시 아님, 실제 공개는 아래 별도 공개 게시 예약으로만 요청' : 'WordPress 미연결 · 서버 환경 변수 설정 필요, 시작하기 참고';
+    $('wordpress-note').textContent = state.connections?.wordpress ? 'WordPress 설정됨 · 초안 전송은 공개 게시 아님, 실제 공개는 아래 별도 공개 게시 예약으로만 요청' : 'WordPress 미연결 · .env 설정 후 앱 재시작 필요, 시작하기 참고';
   }
   async function run(task, success) {
     if (busy) return;
@@ -107,6 +118,7 @@ if (typeof document !== 'undefined') (() => {
   function canLeaveDraft() { return !dirty() || window.confirm('저장하지 않은 콘텐츠 수정을 버리고 계속할까요?'); }
   function canLeaveProduct() { return !productDirty || window.confirm('저장하지 않은 상품 정보 수정을 버릴까요?'); }
   function fillProduct(p) {
+    affiliateBinding=p?{provider:p.provider,source_url:p.source_url,affiliate_url:p.affiliate_url}:null;
     $('product-form').reset(); productId=p?.id ?? null; productVersion=p?.version ?? null;
     if (p) for (const name of names) { if(name==='ownership_confirmed') field(name).checked=p[name]===true; else if(name==='facts') field(name).value=(p[name]||[]).join('\n'); else if(name==='observed_at') field(name).value=localDate(p[name]); else field(name).value=p[name]??''; }
     productDirty=false; $('product-form-title').textContent=p?'상품 수정':'상품 등록'; $('save-product').textContent=p?'변경 저장':'상품 저장';
@@ -138,7 +150,9 @@ if (typeof document !== 'undefined') (() => {
   }
   async function refreshState() {
     const next=await api('/api/state');
-    if (state.connections?.ai_model !== next.connections?.ai_model || state.connections?.ai !== next.connections?.ai) aiCheck=null;
+    if (state.csrf !== next.csrf || ['ai_model','ai','ai_mode','ai_base_url'].some(key => state.connections?.[key] !== next.connections?.[key])) {
+      aiCheck=null; $('confirmed-send').checked=false;
+    }
     state=next; state.products ||= []; state.drafts ||= []; state.jobs ||= [];
     state.publications ||= [];
     if (detail && state.drafts.some(d => d.id === detail.draft.id && d.version !== detail.draft.version)) stale = true;
@@ -224,8 +238,31 @@ if (typeof document !== 'undefined') (() => {
   $('refresh').addEventListener('click',()=>run(refreshState,'상태 갱신 완료, 콘텐츠 편집 내용 유지'));
   $('refresh-jobs').addEventListener('click',()=>run(refreshState,'예약 상태 갱신 완료'));
   $('new-product').addEventListener('click',()=>{if(canLeaveProduct()) fillProduct(null);});
-  $('product-form').addEventListener('input',()=>{productDirty=true;sync();});
-  $('product-form').addEventListener('change',()=>{productDirty=true;sync();});
+  const onProductInput=()=>{
+    if (affiliateBinding) {
+      if (field('affiliate_url').value !== affiliateBinding.affiliate_url) affiliateBinding=null;
+      else if (field('provider').value !== affiliateBinding.provider || field('source_url').value.trim() !== affiliateBinding.source_url) {
+        field('affiliate_url').value='';field('ownership_confirmed').checked=false;affiliateBinding=null;
+        message('상품 URL 또는 서비스 변경됨 · 새 제휴 링크 생성 필요');
+      }
+    }
+    productDirty=true;sync();
+  };
+  $('product-form').addEventListener('input',onProductInput);
+  $('product-form').addEventListener('change',onProductInput);
+  $('generate-affiliate').addEventListener('click',()=>{
+    if ($('generate-affiliate').disabled || !field('source_url').reportValidity()) return;
+    const provider=field('provider').value, source_url=field('source_url').value.trim(), id=productId;
+    run(async()=>{
+      const result=await api('/api/affiliate-links','POST',{provider,source_url});
+      if (productId!==id || field('provider').value!==provider || field('source_url').value.trim()!==source_url)
+        throw new Error('입력 상품 변경됨 · 현재 상품의 제휴 링크 다시 생성 필요');
+      if (result.provider!==provider || result.source_url!==source_url || !safeURL(result.affiliate_url))
+        throw new Error('발급된 제휴 링크 응답 확인 불가');
+      field('affiliate_url').value=result.affiliate_url;field('ownership_confirmed').checked=false;
+      affiliateBinding=result;productDirty=true;
+    },'제휴 링크 생성 완료 · 링크 확인 후 상품 저장 필요');
+  });
   $('product-form').addEventListener('submit',event=>{
     event.preventDefault(); if(busy || productLocked(productId) || !$('product-form').reportValidity())return;
     if(detail && !canLeaveDraft())return;
@@ -307,7 +344,7 @@ if (typeof document !== 'undefined') (() => {
     if(!window.confirm(`실제 WordPress 공개 게시 예약\n콘텐츠: ${detail.draft.title}\n승인 버전: ${detail.draft.version}\n대상: ${targetLabel()}\n현지: ${dateText(run_at)} (${Intl.DateTimeFormat().resolvedOptions().timeZone})\nUTC: ${run_at}\n앱 종료 후에도 예약 유지, 계속할까요?`))return;
     run(async()=>{const result=await api(`/api/drafts/${idPath(detail.draft.id)}/publish-schedule`,'POST',{version:detail.draft.version,run_at,confirmed_publish:true});rememberPublication(result);$('publish-confirm').checked=false;await refreshState();show('jobs');if(!['future','publish'].includes(result.state))throw new Error(result.error || '공개 예약 결과 불명 · 자동 재시도 금지, 원격 상태 조회 필요');return result;},result=>`${publicationStates[result.state]} · WordPress 원격 조회 결과, 정시 발행은 WordPress 운영 상태에 따라 달라짐`);
   });
-  $('ai-check').addEventListener('click',()=>{if($('ai-check').disabled)return;run(async()=>{aiCheck={available:false,error:'연결 확인 실패, 서버 상태 확인 후 다시 조회 필요'};aiCheck={...await api('/api/ai/check','POST',{}),checked_at:new Date().toISOString()};if(!aiCheck.available)throw new Error(aiCheck.error || '로컬 AI 연결 확인 실패');},'로컬 AI 모델 연결 확인 완료, 생성은 별도 동의 후 실행');});
+  $('ai-check').addEventListener('click',()=>{if($('ai-check').disabled)return;run(async()=>{aiCheck={available:false,error:'연결 확인 실패, 서버 상태 확인 후 다시 조회 필요'};aiCheck={...await api('/api/ai/check','POST',{}),checked_at:new Date().toISOString()};if(!aiCheck.available)throw new Error(aiCheck.error || 'AI 연결 확인 실패');},'AI 모델 연결 확인 완료, 생성은 별도 동의 후 실행');});
   $('ai-generate').addEventListener('click',()=>{if($('ai-generate').disabled)return;run(async()=>{await api(`/api/drafts/${idPath(detail.draft.id)}/ai`,'POST',{version:detail.draft.version,style:$('ai-style').value,confirmed_send:true});await refreshDetailAndState();},'후보 생성 완료, 저장본 유지 · 비교 후 직접 적용');});
   window.addEventListener('beforeunload',event=>{if(dirty()||productDirty){event.preventDefault();event.returnValue='';}});
   run(refreshState);

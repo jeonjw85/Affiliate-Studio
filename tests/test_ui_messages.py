@@ -64,7 +64,7 @@ def test_product_validation_messages(change, message):
     (lambda s, p, d: s.schedule(d['id'], 1, '2099-01-01T00:00:00Z'), '예약 시각은 현재 이후 30일 이내로 지정 필요'),
     (lambda s, p, d: s.edit_draft(d['id'], 1, '제목', '본문', 'unsupported'), '지원하지 않는 본문 서식'),
     (lambda s, p, d: s.wordpress_draft(d['id'], 1, False, None), 'WordPress 연결 설정과 외부 초안 전송 확인 필요'),
-    (lambda s, p, d: s.generate_ai(d['id'], 1, 'guide', False, None), '로컬 AI 연결 설정과 자료 전송 확인 필요'),
+    (lambda s, p, d: s.generate_ai(d['id'], 1, 'guide', False, None), 'AI 연결 설정과 자료 전송 확인 필요'),
 ])
 def test_store_messages_preserve_required_review_and_consent(tmp_path, operation, message):
     store, p, d = ready(tmp_path)
@@ -259,7 +259,7 @@ def test_http_boundary_messages_preserve_status_and_block_writes(ui_client, head
 
 @pytest.mark.parametrize('env, key, message', [
     ({}, 'ai_error', '로컬 모델 서버 실행과 AI_MODEL 설정 필요'),
-    ({'AI_MODEL': 'test', 'AI_BASE_URL': 'https://external.example/v1'}, 'ai_error', '로컬 AI 환경변수 형식 확인 필요 (외부 AI 주소는 허용 안 함)'),
+    ({'AI_MODEL': 'test', 'AI_BASE_URL': 'https://external.example/v1'}, 'ai_error', '로컬 AI 환경변수와 AI_LOCAL_HOSTS 확인 필요'),
     ({'WP_URL': 'https://example.com'}, 'wordpress_error', 'WordPress 환경변수 세 개 모두 설정 필요'),
     ({'WP_URL': 'http://example.com', 'WP_USERNAME': 'fixture', 'WP_APP_PASSWORD': 'fixture'}, 'wordpress_error', 'WordPress 서버 환경변수 형식 확인 필요'),
 ])

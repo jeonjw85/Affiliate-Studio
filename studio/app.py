@@ -1,4 +1,4 @@
-"""Single-user loopback server. Public hosting requires a separate auth design."""
+"""Single-user server with explicit local/LAN hosts and same-origin writes."""
 import asyncio
 import os
 import re
@@ -10,18 +10,44 @@ from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from .core import Store, VersionConflict
 from .wordpress import WordPress
-from .ai import LocalAI
+from .ai import LocalAI, OpenAIClient
+from .config import host_list, normalize_host
 from .article_document import CSS_HASH
+from .affiliate import AffiliateLinks
+from .automation import Automation
+from .telegram import Telegram
 
 
 STATIC = Path(__file__).parent / 'static'
 
 
+class _AutomationProxy:
+    """Expose the automation built during lifespan to request handlers."""
+
+    def __init__(self, getter):
+        self._getter = getter
+
+    def __getattr__(self, name):
+        current = self._getter()
+        if current is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return getattr(current, name)
+
+
 def create_app(data_dir=None):
+    hosts = host_list(os.environ.get('STUDIO_ALLOWED_HOSTS', ''), 'STUDIO_ALLOWED_HOSTS', ('127.0.0.1', 'localhost', '::1'))
+    host_pattern = '|'.join(re.escape(f'[{host}]' if ':' in host else host) for host in hosts)
     data = Path(data_dir or os.environ.get('STUDIO_DATA_DIR', Path(__file__).resolve().parent.parent / 'data'))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     store = Store(data / 'studio.db')
     token = secrets.token_urlsafe(32)
+    affiliate = AffiliateLinks(os.environ)
+    telegram = None
+    telegram_error = ''
+    try:
+        telegram = Telegram.from_env(os.environ)
+    except ValueError as error:
+        telegram_error = str(error)
     wp = None
     wp_error = ''
     env = [os.environ.get(k, '') for k in ('WP_URL', 'WP_USERNAME', 'WP_APP_PASSWORD')]
@@ -34,17 +60,26 @@ def create_app(data_dir=None):
         wp_error = 'WordPress 환경변수 세 개 모두 설정 필요'
     task = None
     worker_error = ''
+    automation = None
+    automation_error = ''
     ai = None
     ai_error = ''
+    ai_mode = os.environ.get('AI_MODE', 'local').strip().lower()
     ai_model = os.environ.get('AI_MODEL', '')
-    if ai_model:
+    if ai_mode not in ('local', 'api'):
+        ai_error = 'AI_MODE는 local 또는 api 필요'
+    elif ai_model:
         try:
-            ai = LocalAI(os.environ.get('AI_BASE_URL', 'http://127.0.0.1:11434/v1'), ai_model,
-                         os.environ.get('AI_TIMEOUT_SECONDS', '180'), os.environ.get('AI_DAILY_LIMIT', '10'))
-        except ValueError:
-            ai_error = '로컬 AI 환경변수 형식 확인 필요 (외부 AI 주소는 허용 안 함)'
+            base = os.environ.get('AI_BASE_URL') or ('https://api.openai.com/v1' if ai_mode == 'api' else 'http://127.0.0.1:11434/v1')
+            args = (base, ai_model, os.environ.get('AI_TIMEOUT_SECONDS', '180'), os.environ.get('AI_DAILY_LIMIT', '10'))
+            if ai_mode == 'api':
+                ai = OpenAIClient(*args, mode='api', api_key=os.environ.get('AI_API_KEY', ''))
+            else:
+                ai = LocalAI(*args, allowed_hosts=host_list(os.environ.get('AI_LOCAL_HOSTS', ''), 'AI_LOCAL_HOSTS'))
+        except ValueError as error:
+            ai_error = str(error) if ai_mode == 'api' else '로컬 AI 환경변수와 AI_LOCAL_HOSTS 확인 필요'
     else:
-        ai_error = '로컬 모델 서버 실행과 AI_MODEL 설정 필요'
+        ai_error = '로컬 모델 서버 실행과 AI_MODEL 설정 필요' if ai_mode == 'local' else 'AI_MODEL과 AI_API_KEY 설정 필요'
 
     async def worker():
         nonlocal worker_error
@@ -58,11 +93,26 @@ def create_app(data_dir=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        nonlocal task
+        nonlocal task, automation, automation_error, telegram_error
         task = asyncio.create_task(worker())
+        if telegram is not None and ai is not None and wp is not None:
+            try:
+                await asyncio.to_thread(telegram.connect)
+                automation = Automation(store, telegram, ai, wp)
+                app.state.automation = automation
+                await automation.start()
+            except Exception as error:
+                automation = None
+                detail = str(error) if isinstance(error, ValueError) else '연결 확인 실패'
+                automation_error = ('Telegram 연결 실패: ' + detail) if isinstance(error, ValueError) \
+                    else '자동 운영 연결 실패: Telegram·AI·WordPress 연결 확인 필요'
+                if 'Telegram' not in automation_error:
+                    automation_error = '자동 운영 시작 실패: ' + detail
         try:
             yield
         finally:
+            if automation is not None:
+                await automation.stop()
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
@@ -77,8 +127,9 @@ def create_app(data_dir=None):
     @app.middleware('http')
     async def boundary(request: Request, call_next):
         host = request.headers.get('host', '')
-        if not re.fullmatch(r'(?:127\.0\.0\.1|localhost)(?::[0-9]{1,5})?', host):
-            return JSONResponse({'error':'로컬 접속만 지원'}, status_code=403)
+        normalized_host = re.sub(r'^\[([^\]]+)\]', lambda match: '[' + normalize_host(match[1]) + ']', host)
+        if not re.fullmatch(rf'(?:{host_pattern})(?::[0-9]{{1,5}})?', normalized_host.lower()):
+            return JSONResponse({'error':'허용된 서버 주소만 지원' if os.environ.get('STUDIO_ALLOWED_HOSTS') else '로컬 접속만 지원'}, status_code=403)
         origin = request.headers.get('origin')
         if origin and origin != f'{request.url.scheme}://{host}':
             return JSONResponse({'error':'다른 출처의 요청은 허용 안 함'}, status_code=403)
@@ -111,7 +162,14 @@ def create_app(data_dir=None):
     @app.get('/api/state')
     def state():
         return dict(store.state(), csrf=token, connections={'wordpress':wp is not None, 'wordpress_error':wp_error, 'wordpress_url': wp.url if wp else '',
-                    'ai': ai is not None, 'ai_model': ai_model, 'ai_error': ai_error}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
+                    'ai': ai is not None, 'ai_mode': ai_mode, 'ai_base_url': ai.url if ai else '',
+                    'ai_model': ai_model, 'ai_error': ai_error, 'affiliate': affiliate.status,
+                    'telegram': telegram is not None, 'telegram_error': telegram_error,
+                    'automation': automation is not None, 'automation_error': automation_error or ('' if automation else ('Telegram·AI·WordPress 세 연결 모두 필요' if telegram is None else '자동 운영 연결 확인 필요'))}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
+
+    @app.post('/api/affiliate-links')
+    def affiliate_link(body: dict):
+        return affiliate.generate(body.get('provider'), body.get('source_url'))
 
     @app.post('/api/ai/check')
     def ai_check(body: dict):
@@ -196,6 +254,21 @@ def create_app(data_dir=None):
     @app.post('/api/drafts/{id}/wordpress')
     def wordpress(id: str, body: dict):
         return store.wordpress_draft(id, body.get('version'), body.get('confirmed'), wp)
+
+    from .automation_routes import install_routes as install_automation
+
+    def automation_status():
+        if automation is None:
+            return {'configured': False, 'telegram': telegram is not None, 'ai': ai is not None,
+                    'wordpress': wp is not None, 'running': False,
+                    'last_error': automation_error or 'Telegram·AI·WordPress 세 연결 모두 필요',
+                    'affiliate_required': False, 'wordpress_url': wp.url if wp else '',
+                    'worker_running': task is not None and not task.done()}
+        return dict(automation.status(), wordpress_url=wp.url if wp else '',
+                    affiliate_required=False,
+                    worker_running=task is not None and not task.done())
+
+    install_automation(app, store, automation_status)
 
     @app.get('/')
     def index():

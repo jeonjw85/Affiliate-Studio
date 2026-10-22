@@ -12,11 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT_FILES = (
     'README.md', 'requirements.txt', 'requirements.lock', 'run.py',
     'start.sh', 'Start.command', '.gitignore', 'package.json', 'package-lock.json',
+    '.env.example', 'Dockerfile', 'compose.yaml', '.dockerignore',
 )
 LOCAL_ONLY_FILES = (
     'PLAN.md', 'VERIFICATION.md', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md',
     'BACKEND_TDD.md', 'UI_TDD.md', 'FIX_VERIFY.md',
     '.hermes/plans/local.md', '.claude/notes.md', '.codex/notes.md',
+    '.env', '.env.production', '.env.backup',
 )
 
 
@@ -60,7 +62,7 @@ def test_gitignore_excludes_local_notes_but_allows_readme(tmp_path):
     subprocess.run(['git', 'init', '--quiet', str(tmp_path)], check=True, capture_output=True)
     result = subprocess.run(
         ['git', '-C', str(tmp_path), 'check-ignore', '--stdin'],
-        input='\n'.join((*LOCAL_ONLY_FILES, 'README.md')) + '\n',
+        input='\n'.join((*LOCAL_ONLY_FILES, 'README.md', '.env.example')) + '\n',
         text=True, capture_output=True, timeout=10,
     )
     assert result.returncode == 0, result.stderr

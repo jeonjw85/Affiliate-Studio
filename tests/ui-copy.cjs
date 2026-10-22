@@ -18,7 +18,7 @@ test('static guidance uses short copy while retaining consent and publication li
     assert.equal(d.querySelector('#content-heading').textContent, '콘텐츠 검토와 승인');
     assert.equal(d.querySelector('#metrics-heading').textContent, '성과 기록');
     assert.equal(d.querySelector('#guide-heading').textContent, '사용 방법');
-    assert.match(d.querySelector('#confirmed-send').closest('label').textContent, /현재 저장본.*로컬 AI.*전송.*동의/);
+    assert.match(d.querySelector('#confirmed-send').closest('label').textContent, /현재 저장본.*설정된 AI.*전송.*동의/);
     assert.match(d.querySelector('#approval-confirm').closest('label').textContent, /상품 정보.*제휴 고지.*표현.*정책.*직접 확인/);
     assert.match(d.querySelector('#publish-confirm').closest('label').textContent, /WordPress.*공개.*예약.*동의.*로컬 ZIP.*다름/);
     assert.match(d.querySelector('.ai-card').textContent, /제휴 URL.*WordPress 비밀번호.*전송 안 함/);
@@ -81,6 +81,17 @@ test('app-owned copy is brief without changing saved content, times or explicit 
     assert.match($('publication-list').textContent,/동일 버전.*재예약 불가/);
     assert.match($('publication-list').textContent,/취소 확인.*수정·저장.*재승인.*새 원격 초안.*새 예약/);
     assert.equal($('draft-body').value,body);
+  } finally { dom.window.close(); }
+});
+
+test('automation copy is brief and distinguishes scheduled from published', async () => {
+  briefCopy(source('automation.js'));
+  const dom = new JSDOM(source('index.html'));
+  try {
+    const d = dom.window.document;
+    briefCopy(d.querySelector('#view-automation').textContent);
+    assert.match(d.querySelector('#view-automation').textContent, /쿠팡.*토스.*편수|편수.*각각/);
+    assert.match(d.querySelector('#view-automation').textContent, /API 키.*필요 없음/);
   } finally { dom.window.close(); }
 });
 
