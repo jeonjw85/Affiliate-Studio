@@ -86,9 +86,14 @@ def _is_bot_reply(reply, client):
             and (reply.get('chat') or {}).get('id') == client.chat_id)
 
 
-def question_text(request):
+def question_text(request, product=None):
     """Ask only for the missing description; request ID ties the reply."""
-    return ('상품 정보를 읽지 못해 설명이 필요합니다.\n'
+    label = ''
+    if product:
+        name = (product.get('evidence') or {}).get('name')
+        label = f'{product.get("index", 1)}번 상품' + (f' ({name})' if name else '') + '\n'
+    return (label +
+            '상품 정보를 읽지 못해 설명이 필요합니다.\n'
             '이 메시지에 답장으로 아래 형식을 보내주세요.\n'
             '상품명: 상품 이름과 선택한 옵션\n'
             '특징: 확인한 특징이나 구성\n'
