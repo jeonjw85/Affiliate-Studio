@@ -91,6 +91,12 @@ def install_routes(app, store, status, refresh=None, retry_update=None, data_dir
             raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
         return retry_update(request_id)
 
+    @app.post('/api/automation/requests/{request_id}/refresh')
+    def automation_refresh(request_id: str):
+        if refresh is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return refresh(request_id)
+
     @app.put('/api/automation/settings')
     def automation_settings(body: dict):
         current = get_settings(store, now())

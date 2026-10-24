@@ -256,6 +256,32 @@ def test_next_day_quota_resets_and_old_published_rows_do_not_count(tmp_path):
     assert states[[key for key in states if key != 'yesterday'][0]] == 'scheduled'
 
 
+def test_selected_request_refreshes_remote_publish_status(tmp_path):
+    automation, store, remote, receive_update = build(tmp_path)
+    receive_update(store, automation.telegram, message_update(1, COUPANG), AT,
+                   opener=lambda url, at: inspect(remote, url))
+    due, _ = prepare(automation)
+    automation.tick(due)
+    request = automation.public(due)['requests'][0]
+    post = next(iter(remote.posts.values()))
+    post['status'] = 'publish'
+    post['link'] = 'https://wp.example.test/fixture-post/'
+    refreshed = automation.refresh(request['id'], due + timedelta(minutes=2))
+    assert refreshed['state'] == 'published'
+    assert refreshed['remote_url'] == 'https://wp.example.test/fixture-post/'
+    assert automation.public(due)['requests'][0]['state'] == 'published'
+    stores = [call for call in remote.wp_requests if call[0] == 'POST']
+    assert len(stores) == 2  # create + schedule only; refresh is read-only
+
+
+def test_refresh_without_remote_article_is_rejected(tmp_path):
+    automation, store, remote, receive_update = build(tmp_path)
+    receive_update(store, automation.telegram, message_update(1, COUPANG), AT,
+                   opener=lambda url, at: inspect(remote, url))
+    with pytest.raises(ValueError):
+        automation.refresh(automation.public(AT)['requests'][0]['id'], AT)
+
+
 def test_daily_limits_create_expected_slots_and_zero_disables(tmp_path):
     from automation_fixtures import make_settings
     from studio.automation_store import save_settings

@@ -417,7 +417,8 @@ class Automation:
         """Read-only remote status refresh for one request."""
         if not self.wordpress:
             raise ValueError('WordPress 연결 설정 필요')
-        return reconcile_post(self.store, request_id, self.wordpress, at or self.clock())
+        at = at or self.clock()
+        return reconcile_post(self.store, request_id, self.wordpress, at)
 
     def deliver(self, at=None):
         if not self.telegram:

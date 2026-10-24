@@ -234,6 +234,20 @@
         box.append(anchor);
       }
     }
+    const refresh = node('button', '원격 상태 조회', 'small');
+    refresh.type = 'button';
+    refresh.id = 'automation-request-refresh';
+    refresh.setAttribute('data-refresh-request', '');
+    refresh.addEventListener('click', () => run(async () => {
+      const updated = await api(`/api/automation/requests/${encodeURIComponent(request.id)}/refresh`, 'POST', {});
+      detail = await api(`/api/automation/requests/${encodeURIComponent(request.id)}`);
+      state = await api('/api/automation');
+      if (state.settings && !dirty) fill(state.settings);
+      renderCounts(); renderRequests(); renderDetail();
+      return updated;
+    }, 'WordPress 원격 상태 조회 완료, 읽기 전용'));
+    box.append(refresh);
+    box.append(node('p', '원격 상태 조회는 WordPress에 읽기 요청만 보내며 글을 다시 만들거나 예약하지 않음', 'field-help'));
     for (const item of detail.notifications || []) box.append(node('p', `알림(${item.state}): ${item.text}`, 'field-help'));
   }
   async function load() {
@@ -254,7 +268,7 @@
   async function run(task, success) {
     if (busy) return;
     busy = true; notice('처리 중'); sync();
-    try { await task(); notice(success); }
+    try { await task(); notice(typeof success === 'function' ? success() : success); }
     catch (error) {
       notice(error.message + (error.status === 409 ? '\n서버 저장본을 다시 불러온 뒤 수정 필요' : ''), true);
     } finally { busy = false; sync(); }
