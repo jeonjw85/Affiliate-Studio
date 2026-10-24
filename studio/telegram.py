@@ -174,11 +174,17 @@ def deliver_notice(store, client, notice_id, at):
             return row
         if row.get('force_reply') and row.get('request_id'):
             request = get_optional(store, c, 'automation_request', row['request_id'])
-            if request is not None and request.get('state') != 'awaiting_info':
-                row.update(state='cancelled', error='질문이 이미 해결됨')
-                store.put(c, 'notice', row)
-                row.pop('_claim', None)
-                return row
+            if request is not None:
+                from .automation_products import products_of
+                waiting = [product for product in products_of(request)
+                           if product['state'] == 'awaiting_info']
+                # The request moves on to publishing while one product still
+                # waits for a description; that question is still valid.
+                if not waiting:
+                    row.update(state='cancelled', error='질문이 이미 해결됨')
+                    store.put(c, 'notice', row)
+                    row.pop('_claim', None)
+                    return row
         claimed = claim(store, c, 'notice', notice_id, ('pending', 'sending'), at)
         if claimed is None:
             return {**row, '_claim': None}
@@ -201,9 +207,22 @@ def deliver_notice(store, client, notice_id, at):
         # request even when several products are waiting for descriptions.
         request = (get_optional(store, c, 'automation_request', claimed['request_id'])
                    if claimed.get('request_id') and claimed.get('force_reply') else None)
-        if request is not None and request.get('state') == 'awaiting_info':
-            store.put(c, 'automation_request',
-                      {**request, 'question_message_id': message_id})
+        if request is not None:
+            from .automation_products import products_of, with_products
+            products = products_of(request)
+            waiting = [product for product in products if product['state'] == 'awaiting_info']
+            if waiting:
+                # The question text names the product; bind the sent message to
+                # that product, not just to the request.
+                event = claimed.get('event_key', '')
+                target = next((product for product in waiting
+                               if event.startswith(f'question:{product["index"]}:')), waiting[0])
+                for product in products:
+                    if product['index'] == target['index']:
+                        product['question_message_id'] = message_id
+                updated = with_products(request, products)
+                updated['question_message_id'] = message_id
+                store.put(c, 'automation_request', updated)
         return finish(store, c, 'notice', notice_id, claimed['_claim'],
                       {'state': 'sent', 'attempts': claimed['attempts'] + 1,
                        'telegram_message_id': message_id, 'next_attempt_at': None, 'error': ''})

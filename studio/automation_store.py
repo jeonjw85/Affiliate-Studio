@@ -135,10 +135,13 @@ def public_state(store, at, *, target=None):
         requests = [public(row) for row in store.rows(c, 'automation_request')]
         notices = [public(row) for row in store.rows(c, 'notice')]
         publications = [public(row) for row in store.rows(c, 'automation_publication')]
+    from .automation_products import request_providers
     counts = {provider: {} for provider in ('coupang', 'toss')}
     for row in requests:
-        if row.get('provider') in counts:
-            counts[row['provider']][row['state']] = counts[row['provider']].get(row['state'], 0) + 1
+        # A comparison post counts for every service it includes.
+        for provider in request_providers(row):
+            if provider in counts:
+                counts[provider][row['state']] = counts[provider].get(row['state'], 0) + 1
     next_slots = slots_for_day(settings, at.astimezone(ZoneInfo(settings['schedule']['timezone'])).date(),
                                target) if target and settings['enabled'] else []
     next_slots.sort(key=lambda slot: slot['run_at'])

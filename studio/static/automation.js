@@ -140,7 +140,10 @@
     preview.hidden = !detail;
     if (!detail) { box.append(node('p', '요청을 선택하면 근거와 발행 결과 표시', 'empty')); preview.srcdoc = ''; return; }
     const request = detail.request, publication = detail.publications?.[0];
-    box.append(node('h3', request.evidence?.name || '상품 정보 확인 필요'));
+    const products = request.products || (request.affiliate_url ? [{
+      index: 1, provider: request.provider, state: request.state,
+      affiliate_url: request.affiliate_url, evidence: request.evidence || {}}] : []);
+    box.append(node('h3', products.map(item => item.evidence?.name || '상품 정보 확인 필요').join(' · ')));
     box.append(node('p', `쿠팡·토스 구분: ${providerLabels[request.provider] || request.provider} · 상태: ${stateLabels[request.state] || request.state}`, 'meta'));
     const link = safeURL(request.affiliate_url);
     if (link) {
@@ -148,7 +151,43 @@
       anchor.href = link; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer';
       box.append(anchor);
     }
+    if (products.length) {
+      const list = node('div', null, 'automation-products');
+      list.id = 'automation-products';
+      products.forEach(item => {
+        const card = node('article', null, 'automation-product');
+        card.setAttribute('data-product-index', String(item.index));
+        card.append(node('strong', item.evidence?.name || '상품 정보 확인 필요'),
+                    node('span', `${providerLabels[item.provider] || item.provider} · ${stateLabels[item.state] || item.state}`, 'badge ' + item.state));
+        if (item.evidence?.facts?.length) {
+          const facts = node('ul');
+          for (const fact of item.evidence.facts) facts.append(node('li', `${fact.text} (${fact.source === 'user' ? '사용자 제공' : '페이지 확인'})`));
+          card.append(facts);
+        }
+        const itemLink = safeURL(item.affiliate_url);
+        if (itemLink) {
+          const anchor = node('a', '제휴 링크 열기');
+          anchor.href = itemLink; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer';
+          card.append(anchor);
+        }
+        list.append(card);
+      });
+      box.append(list);
+    }
     if (request.reason) box.append(node('p', `안내: ${request.reason}`, 'field-help'));
+    if (request.update_state === 'update_blocked') {
+      box.append(node('p', `수정 차단: ${request.update_error || '원격 본문이 마지막 확인본과 다름'}`, 'job-error'));
+      const retry = node('button', '수정 재시도', 'small');
+      retry.type = 'button';
+      retry.id = 'automation-update-retry';
+      retry.addEventListener('click', () => run(async () => {
+        await api(`/api/automation/requests/${encodeURIComponent(request.id)}/update`, 'POST', {});
+        detail = await api(`/api/automation/requests/${encodeURIComponent(request.id)}`);
+        state = await api('/api/automation');
+        renderCounts(); renderRequests(); renderDetail();
+      }, '수정 재시도 시작'));
+      box.append(retry);
+    }
     if (request.error) box.append(node('p', request.error, 'job-error'));
     const facts = request.evidence?.facts || [];
     if (facts.length) {

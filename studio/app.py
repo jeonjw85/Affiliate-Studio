@@ -268,7 +268,17 @@ def create_app(data_dir=None):
                     affiliate_required=False,
                     worker_running=task is not None and not task.done())
 
-    install_automation(app, store, automation_status)
+    def automation_refresh(request_id):
+        if automation is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return automation.refresh(request_id)
+
+    def automation_retry_update(request_id):
+        if automation is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return automation.retry_update(request_id)
+
+    install_automation(app, store, automation_status, automation_refresh, automation_retry_update)
 
     @app.get('/')
     def index():

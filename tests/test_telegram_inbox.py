@@ -100,7 +100,7 @@ def test_replay_and_duplicate_link_reuse_one_request(tmp_path):
     assert [row['next_offset'] for row in cursor] == [3]
 
 
-def test_multiple_links_are_rejected_without_creating_requests(tmp_path):
+def test_multiple_links_make_one_comparison_request(tmp_path):
     from studio.core import Store
     from studio.telegram_inbox import receive_update
     store = Store(tmp_path / 'data.db')
@@ -109,11 +109,20 @@ def test_multiple_links_are_rejected_without_creating_requests(tmp_path):
     update = message_update(1, text, entities=[
         {'type': 'url', 'offset': 0, 'length': len(COUPANG)},
         {'type': 'url', 'offset': len(COUPANG) + 1, 'length': len(TOSS)}])
-    assert receive_update(store, client, update, AT, opener=lambda *a: None) is None
+    request_id = receive_update(store, client, update, AT, opener=lambda url, at: {
+        'provider': 'coupang' if 'coupang' in url else 'toss', 'affiliate_url': url,
+        'outcome': 'ready',
+        'evidence': {'name': '합성 상품', 'facts': [{'text': '사실', 'source': 'page',
+                                                     'observed_at': AT.isoformat()}],
+                     'price': None, 'category': '', 'audience': '', 'source_url': None,
+                     'product_key': None, 'conflicts': []}, 'reason': ''})
+    assert request_id
     with store.connect() as c:
-        assert store.rows(c, 'automation_request') == []
+        requests = store.rows(c, 'automation_request')
         notices = store.rows(c, 'notice')
-        assert len(notices) == 1 and '하나' in notices[0]['text']
+    assert len(requests) == 1 and len(requests[0]['products']) == 2
+    assert requests[0]['state'] == 'ready'
+    assert any('접수 완료' in notice['text'] for notice in notices)
     assert client.sent == []  # queued only; a separate sender owns delivery
 
 
@@ -166,7 +175,7 @@ def test_question_message_id_binds_reply_without_request_text(tmp_path):
     deliver_notice(store, client, notice['id'], AT)
     with store.connect() as c:
         request = store.rows(c, 'automation_request')[0]
-    assert request['question_message_id'] == 501
+    assert request['products'][0]['question_message_id'] == 501
     reply = {'message_id': 501, 'from': {'id': 900, 'is_bot': True}, 'chat': {'id': 10}}
     update = message_update(2, '상품명: 답장 연결\n특징: 메시지 ID만 사용', reply_to=reply)
     assert receive_update(store, client, update, AT, opener=needs_info) == request_id

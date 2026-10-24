@@ -33,7 +33,8 @@ async function setup(options = {}) {
     request.url === '/api/automation' ? state : detail)});
   w.confirm = () => true;
   w.fetch = async (url, options = {}) => {
-    requests.push({url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null});
+    requests.push({url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null,
+      headers: options.headers || {}});
     if (url === '/api/state') return {ok: true, json: async () => ({csrf: 'fixture-csrf'})};
     return reply({url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null});
   };
@@ -100,6 +101,38 @@ test('request states stay distinct and user text is inert', async () => {
     assert.match(h.$('automation-detail').textContent, /합성 제목/);
     assert.equal(h.$('automation-preview').getAttribute('sandbox'), '');
     assert.equal(h.$('automation-preview').srcdoc, '<p>본문</p>');
+  } finally { h.close(); }
+});
+
+test('multi-product detail lists products and retries a blocked update', async () => {
+  const h = await setup();
+  try {
+    h.detail.request.products = [
+      {index: 1, provider: 'coupang', state: 'ready', affiliate_url: 'https://link.coupang.com/a/fixture',
+       evidence: {name: '첫 상품', facts: [{text: '첫 사실', source: 'page'}]}},
+      {index: 2, provider: 'toss', state: 'awaiting_info', affiliate_url: 'https://toss.im/_m/fixture',
+       evidence: {name: '', facts: []}}];
+    h.detail.request.update_state = 'update_blocked';
+    h.detail.request.update_error = '원격 본문이 마지막 확인본과 다름';
+    h.w.document.querySelector('nav [data-view="automation"]').click();
+    h.$('automation-requests').querySelector('[data-automation-request="req_one"]').click();
+    await tick();
+    const products = h.$('automation-products');
+    assert.ok(products, 'product list');
+    assert.equal(products.querySelectorAll('[data-product-index]').length, 2);
+    assert.match(products.textContent, /첫 상품/);
+    assert.match(products.textContent, /설명 대기/);
+    assert.match(h.$('automation-detail').textContent, /마지막 확인본/);
+    const retry = h.$('automation-update-retry');
+    assert.ok(retry, 'update retry button');
+    h.detail.request.update_state = 'updating';
+    h.detail.request.products = h.detail.request.products || [];
+    retry.click();
+    await tick();
+    const call = h.requests.find(r => r.url === '/api/automation/requests/req_one/update');
+    assert.equal(call.method, 'POST');
+    assert.equal(call.headers['X-CSRF-Token'], 'fixture-csrf');
+    assert.equal(h.requests.filter(r => r.url === '/api/automation/requests/req_one/update').length, 1);
   } finally { h.close(); }
 });
 

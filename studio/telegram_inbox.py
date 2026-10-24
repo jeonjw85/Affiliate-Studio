@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import re
 from urllib.parse import urlsplit
 
+from .automation_products import (derive_state, next_question, products_of, ready_products,
+                                  with_products)
 from .automation_store import enqueue_notice, get_optional, public, record_id
 from .core import safe_url
 from .product_info import classify_link, inspect_link, merge_evidence, parse_description
@@ -86,9 +88,14 @@ def _is_bot_reply(reply, client):
             and (reply.get('chat') or {}).get('id') == client.chat_id)
 
 
-def question_text(request):
+def question_text(request, product=None):
     """Ask only for the missing description; request ID ties the reply."""
-    return ('상품 정보를 읽지 못해 설명이 필요합니다.\n'
+    label = ''
+    if product:
+        name = (product.get('evidence') or {}).get('name')
+        label = f'{product.get("index", 1)}번 상품' + (f' ({name})' if name else '') + '\n'
+    return (label +
+            '상품 정보를 읽지 못해 설명이 필요합니다.\n'
             '이 메시지에 답장으로 아래 형식을 보내주세요.\n'
             '상품명: 상품 이름과 선택한 옵션\n'
             '특징: 확인한 특징이나 구성\n'
@@ -141,52 +148,72 @@ def receive_update(store, client, update, at, *, opener=None):
             status = _status_text(store, c)
         _commit(store, update_id, at, [], [(None, f'reply:{update_id}', status, False)])
         return None
-    if len(links) > 1:
+    if len(links) > 3:
         _commit(store, update_id, at, [], [(None, f'reply:{update_id}',
-                                           '한 메시지에는 링크 하나만 보내주세요. 상품별로 따로 전송이 필요합니다.', False)],
+                                           '한 메시지에는 링크 2~3개까지 보낼 수 있습니다. 나눠서 전송해주세요.', False)],
                 client.chat_id)
         return None
     if links:
-        affiliate = links[0]
-        duplicate = next((row for row in existing_requests if row.get('affiliate_url') == affiliate), None)
-        if duplicate:
-            if duplicate.get('state') == 'failed':
-                # A failed request can be retried by sending the link again;
-                # this is the only recovery affordance in the bot.
+        unique = list(dict.fromkeys(links))
+        known = {request.get('affiliate_url') for request in existing_requests}
+        known |= {product.get('affiliate_url') for request in existing_requests
+                  for product in products_of(request)}
+        new_links = [link for link in unique if link not in known]
+        duplicate = next((row for row in existing_requests
+                          if row.get('affiliate_url') in unique), None)
+        if not new_links:
+            if duplicate and duplicate.get('state') == 'failed':
                 retry = {**duplicate, 'state': 'ready', 'error': '', 'attempts': 0}
                 _commit(store, update_id, at, [retry], [(duplicate['id'], f'retry:{update_id}',
                                                          f'다시 접수했습니다. 요청 {duplicate["id"]}', False)],
                         client.chat_id)
                 return duplicate['id']
-            _commit(store, update_id, at, [], [(duplicate['id'], f'duplicate:{update_id}',
-                                                f'이미 접수된 링크입니다. 요청 {duplicate["id"]}', False)],
-                    client.chat_id)
-            return duplicate['id']
-        provider = classify_link(affiliate)
+            if duplicate:
+                _commit(store, update_id, at, [], [(duplicate['id'], f'duplicate:{update_id}',
+                                                    f'이미 접수된 링크입니다. 요청 {duplicate["id"]}', False)],
+                        client.chat_id)
+                return duplicate['id']
+            _commit_cursor(store, update_id, at)
+            return None
         request_id = record_id('req', client.bot_id, client.chat_id, message.get('message_id'))
-        try:
-            inspection = (opener or (lambda url, moment: inspect_link(url, moment)))(affiliate, at)
-        except (ValueError, OSError):
-            inspection = {'provider': provider, 'affiliate_url': affiliate, 'outcome': 'needs_info',
-                          'evidence': {'name': '', 'facts': [], 'price': None, 'category': '',
-                                       'audience': '', 'source_url': None, 'product_key': None,
-                                       'conflicts': []},
-                          'reason': '상품 페이지 조회 실패'}
-        # The submitted affiliate URL is authoritative; never trust a rewrite.
-        inspection = dict(inspection, provider=provider, affiliate_url=affiliate)
-        request = {'id': request_id, 'bot_id': client.bot_id, 'chat_id': client.chat_id,
-                   'user_id': client.user_id, 'message_id': message.get('message_id'),
-                   'provider': provider, 'affiliate_url': affiliate,
-                   'evidence': inspection['evidence'],
-                   'state': 'ready' if inspection['outcome'] == 'ready' else 'awaiting_info',
-                   'version': 1, 'created_at': at.isoformat(), 'updated_at': at.isoformat(),
-                   'settings_version': None, 'slot_id': None, 'error': '', 'next_attempt_at': None,
-                   'reason': inspection.get('reason', ''), 'revision': 0}
-        if request['state'] == 'awaiting_info':
-            notices.append((request_id, f'question:0', question_text(request), True))
-        else:
-            notices.append((request_id, 'accepted', f'접수 완료: {request["provider"]} 상품 글을 준비합니다. 요청 {request_id}', False))
+        products = []
+        for index, affiliate in enumerate(new_links, 1):
+            provider = classify_link(affiliate)
+            try:
+                inspection = (opener or (lambda url, moment: inspect_link(url, moment)))(affiliate, at)
+            except (ValueError, OSError):
+                inspection = {'provider': provider, 'affiliate_url': affiliate, 'outcome': 'needs_info',
+                              'evidence': {'name': '', 'facts': [], 'price': None, 'category': '',
+                                           'audience': '', 'source_url': None, 'product_key': None,
+                                           'conflicts': []},
+                              'reason': '상품 페이지 조회 실패'}
+            inspection = dict(inspection, provider=provider, affiliate_url=affiliate)
+            products.append({'index': index, 'provider': provider, 'affiliate_url': affiliate,
+                             'evidence': inspection['evidence'],
+                             'state': 'ready' if inspection['outcome'] == 'ready' else 'awaiting_info',
+                             'revision': 0, 'question_message_id': None,
+                             'reason': inspection.get('reason', '')})
+        request = with_products({
+            'id': request_id, 'bot_id': client.bot_id, 'chat_id': client.chat_id,
+            'user_id': client.user_id, 'message_id': message.get('message_id'),
+            'state': derive_state(products), 'version': 1,
+            'created_at': at.isoformat(), 'updated_at': at.isoformat(),
+            'settings_version': None, 'slot_id': None, 'error': '', 'next_attempt_at': None,
+            'revision': 0, 'update_state': '', 'update_error': ''}, products)
+        request['reason'] = next((p['reason'] for p in products if p['reason']), '')
+        ready_count = len(ready_products(products))
+        if request['state'] == 'ready':
+            names = ', '.join(p['evidence'].get('name') or f'{p["index"]}번 상품' for p in products)
+            notices.append((request_id, 'accepted',
+                            f'접수 완료: {names} ({ready_count}/{len(products)} 상품 확보) 글을 준비합니다. '
+                            f'요청 {request_id}', False))
+        for product in products:
+            if product['state'] == 'awaiting_info':
+                notices.append((request_id, f'question:{product["index"]}:0',
+                                question_text({'id': request_id}, product), True))
         _commit(store, update_id, at, [request], notices, client.chat_id)
+        if duplicate:
+            return duplicate['id']
         return request_id
 
     reply = message.get('reply_to_message')
@@ -197,38 +224,70 @@ def receive_update(store, client, update, at, *, opener=None):
                                            '새 상품은 제휴 링크를 그대로 전송하면 됩니다.', False)], client.chat_id)
         return None
     if isinstance(text, str) and _is_bot_reply(reply, client):
-        request_id = next((row['id'] for row in existing_requests
-                           if row['state'] == 'awaiting_info'
-                           and row.get('question_message_id') == reply.get('message_id')), None)
-        if request_id is None:
+        matched = None
+        for row in existing_requests:
+            for product in products_of(row):
+                if product.get('question_message_id') == reply.get('message_id'):
+                    matched = (row, product)
+                    break
+            if matched:
+                break
+        if matched is None:
             for row in existing_requests:
-                if row['id'] in text and row['state'] != 'awaiting_info':
+                awaiting = [product for product in products_of(row)
+                            if product['state'] == 'awaiting_info']
+                if f'요청 {row["id"]}' not in text or not awaiting:
+                    continue
+                labelled = [product for product in awaiting
+                            if f'{product["index"]}번 상품' in text]
+                if len(labelled) == 1:
+                    matched = (row, labelled[0])
+                elif len(awaiting) == 1:
+                    matched = (row, awaiting[0])
+                if matched:
+                    break
+        if matched is None:
+            for row in existing_requests:
+                if row['id'] in text:
                     _commit(store, update_id, at, [], [(row['id'], f'late:{update_id}',
-                                                        f'이미 설명이 반영된 요청입니다. 현재 상태: {row["state"]}', False)],
+                                                        f'이미 접수된 요청입니다. 현재 상태: {row["state"]}', False)],
                             client.chat_id)
                     return row['id']
-        if request_id is None:
-            request_id = next((row['id'] for row in existing_requests
-                               if row['id'] in text and row['state'] == 'awaiting_info'), None)
-        if request_id is None:
             _commit_cursor(store, update_id, at)
             return None
+        row, target = matched
         supplied = parse_description(text, at)
         if not supplied['name'] or not supplied['facts']:
-            _commit(store, update_id, at, [], [(request_id, f'more_info:{update_id}',
-                                                '상품명과 특징을 한 줄씩 보내주세요.\n' + question_text({'id': request_id}), True)],
-                        client.chat_id)
-            return request_id
-        with store.connect() as c:
-            request = get_optional(store, c, 'automation_request', request_id)
-        merged = merge_evidence(request['evidence'], supplied)
-        state = 'ready' if merged['name'] and merged['facts'] else 'awaiting_info'
-        updated = dict(request, evidence=merged, state=state, revision=request.get('revision', 0) + 1,
-                       updated_at=at.isoformat())
-        notices.append((request_id, f'info:{updated["revision"]}',
-                        f'설명 반영 완료: {merged["name"]}' if state == 'ready' else question_text(updated), state == 'awaiting_info'))
+            _commit(store, update_id, at, [], [(row['id'], f'more_info:{update_id}',
+                                                '상품명과 특징을 한 줄씩 보내주세요.\n'
+                                                + question_text(row, target), True)],
+                    client.chat_id)
+            return row['id']
+        products = products_of(row)
+        merged = merge_evidence(target['evidence'], supplied)
+        for product in products:
+            if product['index'] == target['index']:
+                product.update(evidence=merged, state='ready',
+                               revision=product.get('revision', 0) + 1,
+                               question_message_id=None)
+        updated = with_products(row, products)
+        updated.update(revision=row.get('revision', 0) + 1, updated_at=at.isoformat())
+        if row.get('state') in ('scheduled', 'published', 'checking', 'draft', 'draft_sending',
+                                'uncertain', 'update_blocked'):
+            updated['update_state'] = 'updating'
+            updated['update_error'] = ''
+        else:
+            updated['state'] = derive_state(products)
+            updated['next_attempt_at'] = None
+        remaining = [p for p in products if p['state'] == 'awaiting_info']
+        notices.append((row['id'], f'info:{target["index"]}:{target["revision"] + 1}',
+                        f'{target["index"]}번 상품 설명 반영 완료: {merged["name"]}'
+                        + (' · 같은 글을 다시 작성합니다' if updated.get('update_state') == 'updating' else ''), False))
+        for product in remaining:
+            notices.append((row['id'], f'question:{product["index"]}:{product["revision"]}',
+                            question_text(row, product), True))
         _commit(store, update_id, at, [updated], notices, client.chat_id)
-        return request_id
+        return row['id']
 
     if message.get('photo'):
         _commit(store, update_id, at, [], [(None, f'reply:{update_id}',

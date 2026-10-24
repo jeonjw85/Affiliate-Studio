@@ -55,7 +55,11 @@ class FakeAI:
         if self.remote.fail_ai:
             self.remote.fail_ai -= 1
             raise ValueError('AI 생성 실패')
-        count = len(json.loads(payload['messages'][1]['content'])['facts'])
+        material = json.loads(payload['messages'][1]['content'])
+        if 'products' in material:
+            count = sum(len(item['facts']) for item in material['products'])
+        else:
+            count = len(material['facts'])
         answer = {'title': '합성 상품 안내', 'body': '## 확인한 내용\n확인한 사실 1과 확인한 사실 2를 살펴보세요.',
                   'evidence_refs': [1] if count == 1 else [1, 2]}
         return {'choices': [{'message': {'content': json.dumps(answer)}, 'finish_reason': 'stop'}]}

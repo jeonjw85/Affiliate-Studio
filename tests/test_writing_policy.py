@@ -83,7 +83,8 @@ def test_render_preserves_original_link_and_source_type():
     evidence = make_evidence(facts=facts(2, source='user'), name='합성 <상품>')
     article = {'title': '합성 <제목>', 'body': '## 구성\n**확인한 사실 1**\n\n확인한 사실 2', 'evidence_refs': [1, 2],
                'style': 'intro'}
-    rendered = render_article(article, evidence, 'coupang', LINK,
+    rendered = render_article(article, [{'index': 1, 'provider': 'coupang',
+                                         'affiliate_url': LINK, 'evidence': evidence}],
                               settings=make_settings(writing={'topic': '생활용품'}))
     assert 'href="https://link.coupang.com/a/fixture"' in rendered['html']
     assert 'rel="sponsored nofollow noreferrer"' in rendered['html']
@@ -93,7 +94,8 @@ def test_render_preserves_original_link_and_source_type():
     assert '합성 <상품>' in rendered['text']
     assert rendered['text'].rstrip().endswith(LINK)
     blocked = render_article(dict(article, body='<script>alert(1)</script> 확인한 사실 1'),
-                             evidence, 'coupang', LINK, settings=make_settings())
+                             [{'index': 1, 'provider': 'coupang',
+                               'affiliate_url': LINK, 'evidence': evidence}], settings=make_settings())
     assert '<script>' not in blocked['html']
 
 
