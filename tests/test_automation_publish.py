@@ -4,10 +4,13 @@ import json
 import pytest
 
 from studio.core import Store
+from studio.exporting import DISCLOSURES
 
 AT = datetime(2026, 10, 20, 0, 0, tzinfo=timezone.utc)
 TARGET = 'https://wp.example.test'
-SNAPSHOT = {'title': '합성 제목', 'html': '<p>본문 <a href="https://link.coupang.com/a/fixture">링크</a></p>',
+SNAPSHOT = {'title': '합성 제목',
+            'html': '<p class="disclosure">' + DISCLOSURES['coupang'] + '</p>'
+                    '<p>본문 <a href="https://link.coupang.com/a/fixture">링크</a></p>',
             'provider': 'coupang', 'affiliate_url': 'https://link.coupang.com/a/fixture'}
 
 

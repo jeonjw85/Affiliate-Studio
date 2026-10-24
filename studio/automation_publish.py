@@ -13,6 +13,27 @@ from .core import safe_url
 STATUSES = ('draft', 'future', 'publish', 'pending', 'private', 'trash')
 
 
+class SnapshotConflict(ValueError):
+    """The remote post no longer matches what the app last verified."""
+
+
+def _disclosures(snapshot):
+    if snapshot.get('disclosures'):
+        return list(snapshot['disclosures'])
+    from .exporting import DISCLOSURES
+    provider = snapshot.get('provider')
+    return [DISCLOSURES[provider]] if provider in DISCLOSURES else []
+
+
+def _matches(client, data, snapshot):
+    try:
+        client.verify_snapshot(data, snapshot)
+    except ValueError:
+        return False
+    raw = data.get('content', {}).get('raw', '')
+    return all(text in raw for text in _disclosures(snapshot))
+
+
 def _slug(request_id):
     return 'affiliate-' + sha256(request_id.encode()).hexdigest()[:24]
 
@@ -54,9 +75,7 @@ def _match(client, rows, snapshot):
     for row in rows:
         if not isinstance(row, dict) or type(row.get('id')) is not int or row['id'] <= 0:
             raise ValueError('WordPress 원격 글 형식 확인 불가')
-        try:
-            client.verify_snapshot(row, snapshot)
-        except ValueError:
+        if not _matches(client, row, snapshot):
             continue
         matched.append(row)
     if len(matched) != 1:
@@ -274,6 +293,69 @@ def replace_draft_snapshot(store, request_id, client, new_snapshot, at):
     _store(store, publication)
     if token:
         _release(store, request_id, token, 'draft')
+    return publication
+
+
+def update_snapshot(store, request_id, client, target_snapshot, at):
+    """Update the one existing post in place, never its state or schedule."""
+    at = at.astimezone(timezone.utc)
+    with store.connect() as c:
+        request = _request(store, c, request_id)
+        _target(client, request)
+        publication = _publication(store, c, request_id)
+        if publication is None or not publication.get('remote_id'):
+            raise ValueError('확인된 원격 글 없음')
+        remote_id = publication['remote_id']
+        previous = publication.get('snapshot') or {}
+        if previous.get('title') == target_snapshot.get('title') \
+                and previous.get('html') == target_snapshot.get('html'):
+            return publication
+    data = client.read(remote_id)
+    if _matches(client, data, target_snapshot):
+        return _save_snapshot(store, request_id, client, publication, target_snapshot, at)
+    if not _matches(client, data, previous):
+        raise SnapshotConflict('원격 본문이 마지막 확인본과 다름: WordPress에서 수정 확인 필요')
+    try:
+        client.request('POST', '/' + str(remote_id),
+                       {'title': target_snapshot['title'], 'content': target_snapshot['html']})
+    except Exception:
+        # The write may have landed despite a lost response. Re-read rather
+        # than repeating the POST; a mismatch is a real conflict.
+        try:
+            after = client.read(remote_id)
+        except Exception:
+            raise ValueError('수정 결과 불명: WordPress에서 확인 필요') from None
+        if not _matches(client, after, target_snapshot):
+            raise ValueError('수정 결과 불명: WordPress에서 확인 필요') from None
+    else:
+        after = client.read(remote_id)
+        if not _matches(client, after, target_snapshot):
+            raise ValueError('수정 후 원격 본문 확인 불가')
+    return _save_snapshot(store, request_id, client, publication, target_snapshot, at)
+
+
+def _save_snapshot(store, request_id, client, publication, snapshot, at):
+    remote_id = publication['remote_id']
+    data = client.read(remote_id)
+    state = _state(data.get('status'))
+    public_url = data.get('link') if state == 'published' else None
+    try:
+        public_url = safe_url(public_url) if public_url else None
+    except ValueError:
+        public_url = None
+    publication = dict(publication, snapshot=snapshot, state=state,
+                       remote_url=public_url or _admin(client.url, remote_id),
+                       checked_at=at.isoformat(), error='')
+    _store(store, publication)
+    with store.connect() as c:
+        article = next((row for row in store.rows(c, 'automation_article')
+                        if row['request_id'] == request_id), None)
+        if article is not None:
+            store.put(c, 'automation_article', {**article, 'snapshot': snapshot,
+                                                'title': snapshot['title'], 'html': snapshot['html']})
+        current = _request(store, c, request_id)
+        store.put(c, 'automation_request', {**current, 'state': state,
+                                            'update_state': 'updated', 'update_error': ''})
     return publication
 
 
