@@ -10,11 +10,12 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .automation_publish import ensure_draft, reconcile_post, schedule_post
+from .automation_products import products_of
 from .automation_schedule import claimable, slots_for_day
 from .automation_store import (claim, enqueue_notice, finish, get_optional, get_settings,
                                public, public_state, record_id)
 from .ai import reserve_ai_operation
-from .writing_policy import check_article, compose, prepare_evidence, render_article
+from .writing_policy import check_article, compose, prepare_products, render_article
 
 FINAL_STATES = ('checking', 'draft', 'draft_sending', 'scheduled', 'published', 'failed', 'uncertain')
 RESUME_STATES = ('checking', 'draft', 'draft_sending', 'scheduled', 'uncertain')
@@ -194,19 +195,18 @@ class Automation:
             with self.store.connect() as c:
                 operation = reserve_ai_operation(self.store, c, request['id'], self.ai.daily_limit,
                                                  at, scope='automation')
-            evidence = prepare_evidence(request['evidence'], publish_at)
-            article = compose(self.ai, evidence, settings)
-            problems = check_article(article, evidence)
+            products = prepare_products(products_of(request), publish_at)
+            article = compose(self.ai, products, settings)
+            problems = check_article(article, products)
             if problems:
                 with self.store.connect() as c:
                     operation = reserve_ai_operation(self.store, c, request['id'],
                                                      self.ai.daily_limit, at, scope='automation')
-                article = compose(self.ai, evidence, settings, feedback=problems)
-                problems = check_article(article, evidence)
+                article = compose(self.ai, products, settings, feedback=problems)
+                problems = check_article(article, products)
             if problems:
                 raise ValueError(' / '.join(problems))
-            rendered = render_article(article, evidence, request['provider'],
-                                      request['affiliate_url'], settings=settings)
+            rendered = render_article(article, products, settings=settings)
             snapshot = {'title': article['title'], 'html': rendered['html'],
                         'provider': request['provider'], 'affiliate_url': request['affiliate_url']}
             with self.store.connect() as c:
