@@ -303,10 +303,15 @@ def parse_product(page, at):
             price = {'amount': _amount(offer['price']), 'currency': 'KRW',
                      'source': 'page', 'observed_at': at.isoformat()}
     category = _clean(selected.get('category', '')) if selected else ''
+    from .images import image_url
+    try:
+        image = image_url(page)
+    except Exception:
+        image = None
     return {'name': name[:160], 'facts': [
         {'text': fact[:500], 'source': 'page', 'observed_at': at.isoformat()} for fact in facts[:20]],
         'price': price, 'category': category[:100], 'audience': '', 'source_url': page.url,
-        'product_key': key, 'conflicts': []}
+        'product_key': key, 'conflicts': [], 'image_url': image}
 
 
 def parse_description(text, at):
