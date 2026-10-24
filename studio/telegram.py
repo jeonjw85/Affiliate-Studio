@@ -201,9 +201,22 @@ def deliver_notice(store, client, notice_id, at):
         # request even when several products are waiting for descriptions.
         request = (get_optional(store, c, 'automation_request', claimed['request_id'])
                    if claimed.get('request_id') and claimed.get('force_reply') else None)
-        if request is not None and request.get('state') == 'awaiting_info':
-            store.put(c, 'automation_request',
-                      {**request, 'question_message_id': message_id})
+        if request is not None:
+            from .automation_products import products_of, with_products
+            products = products_of(request)
+            waiting = [product for product in products if product['state'] == 'awaiting_info']
+            if waiting:
+                # The question text names the product; bind the sent message to
+                # that product, not just to the request.
+                event = claimed.get('event_key', '')
+                target = next((product for product in waiting
+                               if event.startswith(f'question:{product["index"]}:')), waiting[0])
+                for product in products:
+                    if product['index'] == target['index']:
+                        product['question_message_id'] = message_id
+                updated = with_products(request, products)
+                updated['question_message_id'] = message_id
+                store.put(c, 'automation_request', updated)
         return finish(store, c, 'notice', notice_id, claimed['_claim'],
                       {'state': 'sent', 'attempts': claimed['attempts'] + 1,
                        'telegram_message_id': message_id, 'next_attempt_at': None, 'error': ''})
