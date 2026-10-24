@@ -76,6 +76,16 @@ def test_requests_and_counts_are_service_specific(tmp_path, monkeypatch):
         assert detail.json()['request']['affiliate_url'] == 'https://link.coupang.com/a/fixture'
 
 
+def test_update_retry_requires_connection(tmp_path, monkeypatch):
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    with TestClient(create_app(tmp_path), base_url='http://127.0.0.1:8787') as c:
+        c.headers['X-CSRF-Token'] = c.get('/api/state').json()['csrf']
+        assert c.post('/api/automation/requests/req/update', json={}).status_code == 400
+        assert c.post('/api/automation/requests/req/update', json={},
+                      headers={'X-CSRF-Token': ''}).status_code == 403
+
+
 def test_daily_quota_is_enforced_per_service(tmp_path):
     """Only as many requests as the service's daily limit may be composed."""
     from studio.core import Store

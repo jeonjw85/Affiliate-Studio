@@ -8,7 +8,7 @@ from .automation_store import SETTINGS_ID, get_optional, get_settings, public, p
 from .core import now
 
 
-def install_routes(app, store, status):
+def install_routes(app, store, status, refresh=None, retry_update=None):
     def runtime():
         return status() or {'configured': False, 'telegram': False, 'ai': False,
                             'wordpress': False, 'running': False, 'last_error': '',
@@ -39,6 +39,24 @@ def install_routes(app, store, status):
         return {'request': public(row), 'article': public(article) if article else None,
                 'publications': [public(item) for item in publications],
                 'notifications': [public(item) for item in notices]}
+
+    @app.post('/api/automation/requests/{request_id}/update')
+    def automation_update(request_id: str):
+        if retry_update is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return retry_update(request_id)
+
+    @app.post('/api/automation/requests/{request_id}/refresh')
+    def automation_refresh(request_id: str):
+        if refresh is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return refresh(request_id)
+
+    @app.post('/api/automation/requests/{request_id}/update')
+    def automation_update(request_id: str):
+        if retry_update is None:
+            raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
+        return retry_update(request_id)
 
     @app.put('/api/automation/settings')
     def automation_settings(body: dict):
