@@ -52,6 +52,15 @@ def test_state_and_detail_do_not_leak_secrets(client):
     assert 'fixture_bot_token_value_abc' not in response.text
 
 
+def test_request_refresh_requires_connection_and_csrf(client):
+    # No WordPress automation is connected in this fixture: the route must
+    # fail closed with a readable message instead of touching the network.
+    assert client.post('/api/automation/requests/req_1/refresh', json={}).status_code == 400
+    assert client.post('/api/automation/requests/req_1/refresh', json={},
+                       headers={'X-CSRF-Token': ''}).status_code == 403
+    assert client.get('/api/automation/requests/req_1/refresh').status_code == 405
+
+
 def test_requests_and_counts_are_service_specific(tmp_path, monkeypatch):
     from studio.core import Store
     for key, value in ENV.items():

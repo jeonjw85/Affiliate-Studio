@@ -157,6 +157,28 @@ test('detail shows image states with local thumbnails only', async () => {
   } finally { h.close(); }
 });
 
+test('selected request can refresh its remote status with a read-only call', async () => {
+  const h = await setup();
+  try {
+    h.w.document.querySelector('nav [data-view="automation"]').click();
+    h.$('automation-requests').querySelector('[data-automation-request="req_one"]').click();
+    await tick();
+    const button = h.$('automation-request-refresh');
+    assert.ok(button, 'per-request remote refresh button');
+    h.detail.publications[0].state = 'published';
+    h.detail.publications[0].remote_url = 'https://wp.example.test/fixture-post/';
+    button.click();
+    await tick();
+    const call = h.requests.find(r => r.url === '/api/automation/requests/req_one/refresh');
+    assert.equal(call.method, 'POST');
+    assert.equal(call.headers['X-CSRF-Token'], 'fixture-csrf');
+    assert.match(h.$('automation-detail').textContent, /공개 확인/);
+    const link = [...h.$('automation-detail').querySelectorAll('a')].find(a => a.textContent === '게시 글 확인');
+    assert.equal(link.href, 'https://wp.example.test/fixture-post/');
+    assert.equal(h.requests.filter(r => r.url.startsWith('/api/automation/requests/req_one/refresh')).length, 1);
+  } finally { h.close(); }
+});
+
 test('affiliate API keys are not an activation requirement', async () => {
   const h = await setup();
   try {
