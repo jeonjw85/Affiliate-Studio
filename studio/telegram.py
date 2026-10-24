@@ -174,11 +174,17 @@ def deliver_notice(store, client, notice_id, at):
             return row
         if row.get('force_reply') and row.get('request_id'):
             request = get_optional(store, c, 'automation_request', row['request_id'])
-            if request is not None and request.get('state') != 'awaiting_info':
-                row.update(state='cancelled', error='질문이 이미 해결됨')
-                store.put(c, 'notice', row)
-                row.pop('_claim', None)
-                return row
+            if request is not None:
+                from .automation_products import products_of
+                waiting = [product for product in products_of(request)
+                           if product['state'] == 'awaiting_info']
+                # The request moves on to publishing while one product still
+                # waits for a description; that question is still valid.
+                if not waiting:
+                    row.update(state='cancelled', error='질문이 이미 해결됨')
+                    store.put(c, 'notice', row)
+                    row.pop('_claim', None)
+                    return row
         claimed = claim(store, c, 'notice', notice_id, ('pending', 'sending'), at)
         if claimed is None:
             return {**row, '_claim': None}

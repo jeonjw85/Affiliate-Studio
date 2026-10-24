@@ -9,8 +9,9 @@ import contextlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .automation_publish import ensure_draft, reconcile_post, schedule_post
-from .automation_products import products_of
+from .automation_publish import (SnapshotConflict, ensure_draft, reconcile_post, schedule_post,
+                                 update_snapshot)
+from .automation_products import derive_state, distinct_providers, products_of
 from .automation_schedule import claimable, slots_for_day
 from .automation_store import (claim, enqueue_notice, finish, get_optional, get_settings,
                                public, public_state, record_id)
@@ -20,6 +21,10 @@ from .writing_policy import check_article, compose, prepare_products, render_art
 FINAL_STATES = ('checking', 'draft', 'draft_sending', 'scheduled', 'published', 'failed', 'uncertain')
 RESUME_STATES = ('checking', 'draft', 'draft_sending', 'scheduled', 'uncertain')
 QUOTA_STATES = ('checking', 'draft', 'draft_sending', 'scheduled', 'published')
+
+
+def _providers(request):
+    return distinct_providers(products_of(request))
 
 
 def _has_remote(request_id, store):
@@ -123,24 +128,44 @@ class Automation:
                             if slot['provider'] == provider]
                  for provider in ('coupang', 'toss')}
         used_slots = {row.get('slot_id') for row in rows if row.get('slot_id')}
-        for provider in ('coupang', 'toss'):
-            limit = settings['schedule']['daily_limits'][provider]
-            # The quota is a daily count: only rows that consumed a slot on
-            # this local day count toward it.
-            used = sum(1 for row in rows if row.get('provider') == provider
-                       and row.get('slot_date') == day
-                       and row.get('state') in QUOTA_STATES + ('failed',))
-            queue = [row for row in ready if row.get('provider') == provider]
-            open_slots = [slot for slot in slots[provider]
-                          if slot['id'] not in used_slots and claimable(slot, at)]
-            for request, slot in zip(queue[:max(0, limit - used)], open_slots):
-                with self.store.connect() as c:
-                    claimed = claim(self.store, c, 'automation_request', request['id'], ('ready',), at)
-                if claimed is None:
-                    continue
-                self._compose(claimed, settings, at, day, run_at=slot['run_at'], slot_id=slot['id'])
-                used_slots.add(slot['id'])
-                processed += 1
+        # One comparison post can include several services; it uses one slot
+        # but consumes one unit from every included service's daily quota.
+        def used(provider):
+            return sum(1 for row in rows
+                       if row.get('slot_date') == day
+                       and row.get('state') in QUOTA_STATES + ('failed',)
+                       and provider in _providers(row))
+
+        for request in ready:
+            providers = _providers(request)
+            if not providers:
+                continue
+            available = [provider for provider in providers
+                         if settings['schedule']['daily_limits'][provider]
+                         and used(provider) < settings['schedule']['daily_limits'][provider]]
+            if len(available) != len(providers):
+                continue
+            picks = {}
+            for provider in providers:
+                pick = next((slot for slot in slots[provider]
+                             if slot['id'] not in used_slots and claimable(slot, at)), None)
+                if pick is None:
+                    break
+                picks[provider] = pick
+            if len(picks) != len(providers):
+                continue
+            with self.store.connect() as c:
+                claimed = claim(self.store, c, 'automation_request', request['id'], ('ready',), at)
+            if claimed is None:
+                continue
+            first = min(picks.values(), key=lambda slot: slot['run_at'])
+            self._compose(claimed, settings, at, day, run_at=first['run_at'],
+                          slot_id=first['id'], providers=providers)
+            used_slots.update(slot['id'] for slot in picks.values())
+            processed += 1
+        if self.wordpress is not None:
+            for request in (row for row in rows if row.get('update_state') == 'updating'):
+                processed += self._apply_update(request, settings, at)
         for request in (row for row in rows if row.get('state') in RESUME_STATES):
             if self.wordpress is None:
                 break
@@ -186,7 +211,62 @@ class Automation:
         except Exception as error:
             self.last_error = str(error) if isinstance(error, ValueError) else 'WordPress 재개 실패'
 
-    def _compose(self, request, settings, at, day, *, run_at=None, slot_id=None):
+    def _apply_update(self, request, settings, at):
+        """Rebuild the article from every ready product and update the same post."""
+        products = products_of(request)
+        ready = [product for product in products if product['state'] == 'ready']
+        if not ready:
+            self._update_state(request['id'], 'awaiting_info', '')
+            return 0
+        try:
+            prepared = prepare_products(ready, at)
+            article = compose(self.ai, prepared, settings)
+            problems = check_article(article, prepared)
+            if problems:
+                article = compose(self.ai, prepared, settings, feedback=problems)
+                problems = check_article(article, prepared)
+            if problems:
+                raise ValueError(' / '.join(problems))
+            rendered = render_article(article, prepared, settings=settings)
+            snapshot = {'title': article['title'], 'html': rendered['html'],
+                        'disclosures': [__import__('studio.exporting', fromlist=['DISCLOSURES'])
+                                        .DISCLOSURES[p] for p in distinct_providers(prepared)],
+                        'products': [{'index': p['index'], 'provider': p['provider'],
+                                      'affiliate_url': p['affiliate_url'], 'evidence': p['evidence']}
+                                     for p in prepared],
+                        'provider': prepared[0]['provider'],
+                        'affiliate_url': prepared[0]['affiliate_url']}
+            update_snapshot(self.store, request['id'], self.wordpress, snapshot, at)
+            with self.store.connect() as c:
+                enqueue_notice(self.store, c, request['id'], f'updated:{at.isoformat()}',
+                               f'글 보완 완료: {article["title"]}', chat_id=self.telegram.chat_id
+                               if self.telegram else 0)
+            return 1
+        except SnapshotConflict as error:
+            self._update_state(request['id'], 'update_blocked', str(error))
+            return 1
+        except ValueError as error:
+            self._update_state(request['id'], 'update_blocked', str(error))
+            return 1
+        except Exception:
+            self.last_error = 'WordPress 보완 실패'
+            return 0
+
+    def _update_state(self, request_id, state, error):
+        with self.store.connect() as c:
+            current = get_optional(self.store, c, 'automation_request', request_id)
+            self.store.put(c, 'automation_request',
+                           {**current, 'update_state': state, 'update_error': error})
+
+    def retry_update(self, request_id):
+        with self.store.connect() as c:
+            current = get_optional(self.store, c, 'automation_request', request_id)
+            if current is None or current.get('update_state') != 'update_blocked':
+                raise ValueError('수정 차단 상태의 요청만 재시도 가능')
+            current.update(update_state='updating', update_error='')
+            return self.store.put(c, 'automation_request', current)
+
+    def _compose(self, request, settings, at, day, *, run_at=None, slot_id=None, providers=None):
         publish_at = datetime.fromisoformat(run_at) if run_at else at + timedelta(minutes=15)
         operation = None
         try:
@@ -195,7 +275,13 @@ class Automation:
             with self.store.connect() as c:
                 operation = reserve_ai_operation(self.store, c, request['id'], self.ai.daily_limit,
                                                  at, scope='automation')
-            products = prepare_products(products_of(request), publish_at)
+            # Only products with enough evidence go into this post. A blocked
+            # product waits for its own description and updates the same post
+            # later; it must not add a link the article cannot describe.
+            ready = [product for product in products_of(request) if product['state'] == 'ready']
+            if not ready:
+                raise ValueError('발행할 상품 정보 없음')
+            products = prepare_products(ready, publish_at)
             article = compose(self.ai, products, settings)
             problems = check_article(article, products)
             if problems:
@@ -208,12 +294,18 @@ class Automation:
                 raise ValueError(' / '.join(problems))
             rendered = render_article(article, products, settings=settings)
             snapshot = {'title': article['title'], 'html': rendered['html'],
-                        'provider': request['provider'], 'affiliate_url': request['affiliate_url']}
+                        'disclosures': [__import__('studio.exporting', fromlist=['DISCLOSURES'])
+                                        .DISCLOSURES[p] for p in distinct_providers(products)],
+                        'products': [{'index': p['index'], 'provider': p['provider'],
+                                      'affiliate_url': p['affiliate_url'], 'evidence': p['evidence']}
+                                     for p in products],
+                        'provider': products[0]['provider'],
+                        'affiliate_url': products[0]['affiliate_url']}
             with self.store.connect() as c:
                 self.store.put(c, 'automation_article', {
                     'id': record_id('article', request['id']), 'request_id': request['id'],
                     'title': article['title'], 'html': rendered['html'], 'snapshot': snapshot,
-                    'provider': request['provider'], 'affiliate_url': request['affiliate_url'],
+                    'provider': snapshot['provider'], 'affiliate_url': snapshot['affiliate_url'],
                     'style': article.get('style'), 'policy_version': article.get('policy_version'),
                     'checks': [], 'created_at': at.isoformat()})
                 finish(self.store, c, 'automation_request', request['id'], request['_claim'],
