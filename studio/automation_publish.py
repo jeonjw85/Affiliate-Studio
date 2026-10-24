@@ -149,10 +149,12 @@ def ensure_draft(store, request_id, client, at):
             _store(store, publication)
             _release(store, request_id, token, publication['state'])
             return publication
-        created = client.request('POST', '', {
-            'title': publication['snapshot']['title'], 'content': publication['snapshot']['html'],
-            'slug': publication['slug'], 'status': 'draft',
-            'comment_status': 'closed', 'ping_status': 'closed'})
+        payload = {'title': publication['snapshot']['title'], 'content': publication['snapshot']['html'],
+                   'slug': publication['slug'], 'status': 'draft',
+                   'comment_status': 'closed', 'ping_status': 'closed'}
+        if publication['snapshot'].get('featured_media'):
+            payload['featured_media'] = publication['snapshot']['featured_media']
+        created = client.request('POST', '', payload)
         if not isinstance(created, dict) or type(created.get('id')) is not int or created['id'] <= 0:
             raise ValueError('WordPress 초안 ID 확인 불가')
         publication.update(remote_id=created['id'], state='draft', checked_at=at.isoformat(), error='')
@@ -316,8 +318,10 @@ def update_snapshot(store, request_id, client, target_snapshot, at):
     if not _matches(client, data, previous):
         raise SnapshotConflict('원격 본문이 마지막 확인본과 다름: WordPress에서 수정 확인 필요')
     try:
-        client.request('POST', '/' + str(remote_id),
-                       {'title': target_snapshot['title'], 'content': target_snapshot['html']})
+        payload = {'title': target_snapshot['title'], 'content': target_snapshot['html']}
+        if target_snapshot.get('featured_media'):
+            payload['featured_media'] = target_snapshot['featured_media']
+        client.request('POST', '/' + str(remote_id), payload)
     except Exception:
         # The write may have landed despite a lost response. Re-read rather
         # than repeating the POST; a mismatch is a real conflict.

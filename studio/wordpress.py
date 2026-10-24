@@ -41,6 +41,53 @@ class WordPress:
                 import json
                 return json.loads(raw)
 
+    def _media_request(self, method, path='', *, params=None, content=None, headers=None):
+        """Media endpoint shares auth and no-redirect transport with posts."""
+        query = dict(params or {})
+        if method == 'GET':
+            query['context'] = 'edit'
+        with httpx.Client(auth=(self.username, self.password), timeout=30,
+                          follow_redirects=False, trust_env=False) as client:
+            with client.stream(method, self.url + '/wp-json/wp/v2/media' + path,
+                               content=content, params=query or None,
+                               headers=headers) as response:
+                if response.status_code not in ((200,) if method == 'GET' else (200, 201)):
+                    raise ValueError('WordPress 미디어 응답 확인 불가')
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 524288:
+                        raise ValueError('WordPress 미디어 응답 크기 초과')
+                import json
+                return json.loads(raw)
+
+    def upload_media(self, filename, content, content_type):
+        """Upload one image; return only a verified media ID and source URL."""
+        if content_type not in ('image/jpeg', 'image/png', 'image/webp'):
+            raise ValueError('지원하지 않는 이미지 형식')
+        if not isinstance(content, (bytes, bytearray)) or not 1 <= len(content) <= 8 * 1024 * 1024:
+            raise ValueError('이미지 크기 확인 필요')
+        safe_name = text(filename, 120)
+        data = self._media_request(
+            'POST', content=bytes(content),
+            headers={'Content-Type': content_type,
+                     'Content-Disposition': f'attachment; filename="{safe_name}"'})
+        media_id = data.get('id') if isinstance(data, dict) else None
+        source = data.get('source_url') if isinstance(data, dict) else None
+        if type(media_id) is not int or media_id <= 0 or not isinstance(source, str) \
+                or not source.startswith(self.url):
+            raise ValueError('WordPress 미디어 ID 확인 불가')
+        return {'id': media_id, 'source_url': safe_url(source)}
+
+    def find_media(self, filename):
+        rows = self._media_request('GET', params={'search': text(filename, 120), 'per_page': 20})
+        if not isinstance(rows, list):
+            raise ValueError('WordPress 미디어 목록 형식 확인 불가')
+        wanted = text(filename, 120)
+        return [row for row in rows if isinstance(row, dict)
+                and (row.get('title', {}).get('raw') == wanted
+                     or str(row.get('source_url', '')).rsplit('/', 1)[-1] == wanted)]
+
     def read(self, id):
         if type(id) is not int or id <= 0: raise ValueError('확인된 원격 글 ID 필요')
         data = self.request('GET', '/' + str(id))

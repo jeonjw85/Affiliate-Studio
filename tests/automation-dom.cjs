@@ -136,6 +136,27 @@ test('multi-product detail lists products and retries a blocked update', async (
   } finally { h.close(); }
 });
 
+test('detail shows image states with local thumbnails only', async () => {
+  const h = await setup();
+  try {
+    h.detail.images = {
+      featured: {kind: 'featured', state: 'uploaded', error: ''},
+      body: {kind: 'body', state: 'unavailable', error: '이미지 생성 한도 소진'}};
+    h.detail.media_usage = {files: 3, bytes: 204800};
+    h.w.document.querySelector('nav [data-view="automation"]').click();
+    h.$('automation-requests').querySelector('[data-automation-request="req_one"]').click();
+    await tick();
+    const images = h.$('automation-images');
+    assert.ok(images, 'image status block');
+    assert.match(images.textContent, /대표 이미지/);
+    assert.match(images.textContent, /본문 이미지 없음|사용 불가|한도/);
+    const thumb = images.querySelector('[data-image-kind="featured"] img');
+    assert.equal(thumb.getAttribute('src'), '/api/automation/requests/req_one/media/featured');
+    assert.equal(images.querySelector('[data-image-kind="body"] img'), null);
+    assert.match(h.$('automation-detail').textContent, /200 KB|204,800|204800/);
+  } finally { h.close(); }
+});
+
 test('affiliate API keys are not an activation requirement', async () => {
   const h = await setup();
   try {

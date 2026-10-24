@@ -175,6 +175,32 @@
       box.append(list);
     }
     if (request.reason) box.append(node('p', `안내: ${request.reason}`, 'field-help'));
+    if (detail.images) {
+      const boxImages = node('div', null, 'automation-images');
+      boxImages.id = 'automation-images';
+      const labels = {featured: '대표 이미지', body: '본문 이미지'};
+      for (const kind of ['featured', 'body']) {
+        const item = detail.images[kind] || {state: 'unavailable', error: '없음'};
+        const card = node('div', null, 'automation-image');
+        card.setAttribute('data-image-kind', kind);
+        card.append(node('strong', `${labels[kind]}: ${item.state === 'uploaded' ? '포함' : '없음'}`));
+        if (item.state === 'uploaded') {
+          const img = node('img');
+          img.alt = labels[kind];
+          img.loading = 'lazy';
+          img.src = `/api/automation/requests/${encodeURIComponent(request.id)}/media/${kind}`;
+          card.append(img);
+        } else if (item.error) {
+          card.append(node('small', item.error, 'field-help'));
+        }
+        boxImages.append(card);
+      }
+      if (detail.media_usage) {
+        const kb = Math.round(detail.media_usage.bytes / 1024);
+        boxImages.append(node('p', `저장 이미지 ${detail.media_usage.files}개 · ${kb.toLocaleString('ko-KR')} KB`, 'field-help'));
+      }
+      box.append(boxImages);
+    }
     if (request.update_state === 'update_blocked') {
       box.append(node('p', `수정 차단: ${request.update_error || '원격 본문이 마지막 확인본과 다름'}`, 'job-error'));
       const retry = node('button', '수정 재시도', 'small');
