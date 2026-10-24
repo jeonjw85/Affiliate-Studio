@@ -16,6 +16,7 @@ from .article_document import CSS_HASH
 from .affiliate import AffiliateLinks
 from .automation import Automation
 from .telegram import Telegram
+from .images import ImageClient
 
 
 STATIC = Path(__file__).parent / 'static'
@@ -62,6 +63,12 @@ def create_app(data_dir=None):
     worker_error = ''
     automation = None
     automation_error = ''
+    image = None
+    image_error = ''
+    try:
+        image = ImageClient.from_env(os.environ)
+    except ValueError as error:
+        image_error = str(error)
     ai = None
     ai_error = ''
     ai_mode = os.environ.get('AI_MODE', 'local').strip().lower()
@@ -98,7 +105,7 @@ def create_app(data_dir=None):
         if telegram is not None and ai is not None and wp is not None:
             try:
                 await asyncio.to_thread(telegram.connect)
-                automation = Automation(store, telegram, ai, wp)
+                automation = Automation(store, telegram, ai, wp, images=image)
                 app.state.automation = automation
                 await automation.start()
             except Exception as error:
@@ -165,6 +172,7 @@ def create_app(data_dir=None):
                     'ai': ai is not None, 'ai_mode': ai_mode, 'ai_base_url': ai.url if ai else '',
                     'ai_model': ai_model, 'ai_error': ai_error, 'affiliate': affiliate.status,
                     'telegram': telegram is not None, 'telegram_error': telegram_error,
+                    'image': image is not None, 'image_error': image_error,
                     'automation': automation is not None, 'automation_error': automation_error or ('' if automation else ('Telegram·AI·WordPress 세 연결 모두 필요' if telegram is None else '자동 운영 연결 확인 필요'))}, worker_running=task is not None and not task.done() and not worker_error, worker_error=worker_error)
 
     @app.post('/api/affiliate-links')

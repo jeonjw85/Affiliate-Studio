@@ -54,11 +54,12 @@ def _remember_check(store, request_id, at):
 
 
 class Automation:
-    def __init__(self, store, telegram, ai, wordpress, *, clock=None):
+    def __init__(self, store, telegram, ai, wordpress, *, clock=None, images=None):
         self.store = store
         self.telegram = telegram
         self.ai = ai
         self.wordpress = wordpress
+        self.images = images
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.running = False
         self.last_error = ''
@@ -91,8 +92,8 @@ class Automation:
     def status(self):
         return {'configured': bool(self.telegram and self.ai and self.wordpress),
                 'telegram': bool(self.telegram), 'ai': bool(self.ai),
-                'wordpress': bool(self.wordpress), 'running': self.running,
-                'last_error': self.last_error}
+                'wordpress': bool(self.wordpress), 'image': bool(self.images),
+                'running': self.running, 'last_error': self.last_error}
 
     def public(self, at=None):
         return public_state(self.store, at or self.clock(),
