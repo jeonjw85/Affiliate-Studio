@@ -8,7 +8,8 @@ from datetime import timezone
 from pathlib import Path
 
 from .automation_store import get_optional, public, record_id
-from .images import image_prompt, reserve_image_operation, save_image
+from .images import (allowed_image_url, download_image, image_prompt,
+                     reserve_image_operation, save_image)
 
 
 def media_id(request_id, kind):
@@ -85,7 +86,6 @@ def prepare_featured_image(store, request_id, evidence, client, data_dir, at):
     if not url:
         return save_media(store, _record(request_id, 'featured', state='unavailable',
                                          error='상품 페이지 대표 이미지 없음'))
-    from .images import allowed_image_url, download_image
     try:
         allowed_image_url(url)
         downloaded = download_image(url)
