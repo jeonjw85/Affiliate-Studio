@@ -91,6 +91,7 @@ test('automation copy is brief and distinguishes scheduled from published', asyn
     const d = dom.window.document;
     briefCopy(d.querySelector('#view-automation').textContent);
     assert.match(d.querySelector('#view-automation').textContent, /쿠팡.*토스.*편수|편수.*각각/);
+    assert.match(d.querySelector('#view-guide').textContent, /2~3개.*비교 글|비교 글.*2~3개/);
     assert.match(d.querySelector('#view-automation').textContent, /API 키.*필요 없음/);
   } finally { dom.window.close(); }
 });
