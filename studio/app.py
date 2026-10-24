@@ -286,7 +286,8 @@ def create_app(data_dir=None):
             raise ValueError('자동 운영 연결 미설정: Telegram·AI·WordPress 확인 필요')
         return automation.retry_update(request_id)
 
-    install_automation(app, store, automation_status, automation_refresh, automation_retry_update)
+    install_automation(app, store, automation_status, automation_refresh, automation_retry_update,
+                       data_dir=data)
 
     @app.get('/')
     def index():

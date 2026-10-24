@@ -344,7 +344,26 @@ WordPress에서 본문을 직접 수정한 글은 자동으로 덮어쓰지 않�
 WordPress 연결이 끊긴 채 전송되면 결과 불명으로 남고 글을 다시 만들지 않음
 실패한 요청은 같은 제휴 링크를 다시 보내 재접수 가능
 
-자동 글은 텍스트·목록·표·제휴 링크 중심이며 이미지 수집·업로드는 하지 않음
+자동 글은 상품 페이지 대표 이미지를 WordPress 대표 이미지로 한 장 넣고,
+AI가 만든 설명용 삽화를 본문 상단에 한 장 넣음 (AI 생성 이미지 표시)
+
+### 이미지 설정
+
+```dotenv
+IMAGE_MODE=api
+IMAGE_BASE_URL=https://api.openai.com/v1
+IMAGE_MODEL=gpt-image-1
+IMAGE_API_KEY=
+IMAGE_DAILY_LIMIT=3
+```
+
+`IMAGE_MODE`를 비우면 AI 삽화 없이 상품 대표 이미지만 사용
+이미지 생성은 OpenAI 호환 `/images/generations`의 b64 결과만 받음
+상품 페이지가 차단되거나 이미지가 허용 형식·크기가 아니면 **이미지 없이 발행**
+글 보완 시 기존 이미지를 그대로 쓰며 새로 만들지 않음
+
+이미지 저작권·사용 허용 여부와 개인정보 포함 여부는 앱이 보증하지 않음
+게시 전에 이미지 사용 권한과 내용을 직접 확인 필요
 자동 글은 1,200~2,000자까지 쓸 수 있어 로컬 AI는 `OLLAMA_CONTEXT_LENGTH=16384` 권장
 자동 작성은 기존 수동 AI와 같은 `AI_DAILY_LIMIT`를 함께 사용하며, 한도가 없으면 링크는 대기 상태로 남음
 Docker는 `.env`의 `OLLAMA_CONTEXT_LENGTH` 값으로 조정, 메모리 여유 필요

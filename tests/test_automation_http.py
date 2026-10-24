@@ -86,6 +86,26 @@ def test_update_retry_requires_connection(tmp_path, monkeypatch):
                       headers={'X-CSRF-Token': ''}).status_code == 403
 
 
+def test_media_endpoint_only_serves_the_requests_saved_file(tmp_path, monkeypatch):
+    from studio.core import Store
+    from studio.automation_media import save_media
+    from test_images import png_bytes
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    with TestClient(create_app(tmp_path), base_url='http://127.0.0.1:8787') as c:
+        store = c.app.state.store
+        media = tmp_path / 'media'; media.mkdir()
+        (media / 'req_one-featured-abc.png').write_bytes(png_bytes(300, 300))
+        save_media(store, {'id': 'media_one', 'request_id': 'req_one', 'kind': 'featured',
+                           'state': 'uploaded', 'local_path': 'req_one-featured-abc.png',
+                           'content_type': 'image/png'})
+        response = c.get('/api/automation/requests/req_one/media/featured')
+        assert response.status_code == 200
+        assert response.headers['content-type'] == 'image/png'
+        assert c.get('/api/automation/requests/req_two/media/featured').status_code == 404
+        assert c.get('/api/automation/requests/req_one/media/other').status_code == 400
+
+
 def test_daily_quota_is_enforced_per_service(tmp_path):
     """Only as many requests as the service's daily limit may be composed."""
     from studio.core import Store
