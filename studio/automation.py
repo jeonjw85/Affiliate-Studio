@@ -54,12 +54,13 @@ def _remember_check(store, request_id, at):
 
 
 class Automation:
-    def __init__(self, store, telegram, ai, wordpress, *, clock=None, images=None):
+    def __init__(self, store, telegram, ai, wordpress, *, clock=None, images=None, data_dir=None):
         self.store = store
         self.telegram = telegram
         self.ai = ai
         self.wordpress = wordpress
         self.images = images
+        self.data_dir = data_dir or store.path.parent
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.running = False
         self.last_error = ''
@@ -198,6 +199,40 @@ class Automation:
             processed += 1
         return processed
 
+    def _existing_images(self, request_id):
+        from .automation_media import media_record
+        result = {'featured': None, 'body': None}
+        for kind in ('featured', 'body'):
+            record = media_record(self.store, request_id, kind)
+            if record and record.get('state') == 'uploaded':
+                result[kind] = record
+        return result
+
+    def _prepare_images(self, request, products, settings, at):
+        """Prepare both images independently; never raise into publishing."""
+        from .automation_media import prepare_body_image, prepare_featured_image
+        featured = body = None
+        reasons = []
+        evidence = products[0]['evidence'] if products else {}
+        try:
+            featured = prepare_featured_image(self.store, request['id'], evidence,
+                                              self.wordpress, self.data_dir, at)
+        except Exception:
+            featured = None
+            reasons.append('대표 이미지 준비 실패')
+        try:
+            body = prepare_body_image(self.store, request['id'], self.images, self.wordpress,
+                                      products, settings, self.data_dir, at)
+        except Exception:
+            body = None
+            reasons.append('본문 이미지 준비 실패')
+        for record, label in ((featured, '대표'), (body, '본문')):
+            if record and record.get('state') != 'uploaded':
+                reasons.append(f'{label} 이미지 없음: {record.get("error") or "사용 불가"}')
+        return {'featured': featured if featured and featured.get('state') == 'uploaded' else None,
+                'body': body if body and body.get('state') == 'uploaded' else None,
+                'reasons': reasons}
+
     def _resume(self, request, at):
         """Finish a request that stopped between draft creation and scheduling."""
         try:
@@ -221,6 +256,7 @@ class Automation:
             return 0
         try:
             prepared = prepare_products(ready, at)
+            media = self._existing_images(request['id'])
             article = compose(self.ai, prepared, settings)
             problems = check_article(article, prepared)
             if problems:
@@ -228,8 +264,12 @@ class Automation:
                 problems = check_article(article, prepared)
             if problems:
                 raise ValueError(' / '.join(problems))
-            rendered = render_article(article, prepared, settings=settings)
+            body_image = media['body']['remote_url'] if media['body'] else None
+            rendered = render_article(article, prepared, settings=settings, body_image=body_image)
             snapshot = {'title': article['title'], 'html': rendered['html'],
+                        'featured_media': media['featured']['remote_id'] if media['featured'] else None,
+                        'body_media': media['body']['remote_id'] if media['body'] else None,
+                        'body_image_html': rendered.get('body_image_html', ''),
                         'disclosures': [__import__('studio.exporting', fromlist=['DISCLOSURES'])
                                         .DISCLOSURES[p] for p in distinct_providers(prepared)],
                         'products': [{'index': p['index'], 'provider': p['provider'],
@@ -283,6 +323,7 @@ class Automation:
             if not ready:
                 raise ValueError('발행할 상품 정보 없음')
             products = prepare_products(ready, publish_at)
+            media = self._prepare_images(request, products, settings, at)
             article = compose(self.ai, products, settings)
             problems = check_article(article, products)
             if problems:
@@ -293,8 +334,13 @@ class Automation:
                 problems = check_article(article, products)
             if problems:
                 raise ValueError(' / '.join(problems))
-            rendered = render_article(article, products, settings=settings)
+            body_image = media['body']['remote_url'] if media['body'] else None
+            rendered = render_article(article, products, settings=settings,
+                                      body_image=body_image)
             snapshot = {'title': article['title'], 'html': rendered['html'],
+                        'featured_media': media['featured']['remote_id'] if media['featured'] else None,
+                        'body_media': media['body']['remote_id'] if media['body'] else None,
+                        'body_image_html': rendered.get('body_image_html', ''),
                         'disclosures': [__import__('studio.exporting', fromlist=['DISCLOSURES'])
                                         .DISCLOSURES[p] for p in distinct_providers(products)],
                         'products': [{'index': p['index'], 'provider': p['provider'],
@@ -324,9 +370,19 @@ class Automation:
             due = datetime.fromisoformat(run_at) if run_at else at + timedelta(minutes=15)
             publication = schedule_post(self.store, request['id'], self.wordpress, due, at)
             if publication['state'] == 'scheduled' and self.telegram:
+                images = []
+                if media['featured']:
+                    images.append('대표 이미지 포함')
+                else:
+                    images.append('대표 이미지 없이 발행')
+                if media['body']:
+                    images.append('본문 이미지 포함')
+                else:
+                    images.append('본문 이미지 없이 발행')
                 with self.store.connect() as c:
                     enqueue_notice(self.store, c, request['id'], 'scheduled',
-                                   f'예약 확인: {article["title"]}\n{publication["run_at"]}',
+                                   f'예약 확인: {article["title"]}\n{publication["run_at"]}\n'
+                                   + ' · '.join(images),
                                    chat_id=self.telegram.chat_id)
         except Exception as error:
             message = str(error) if isinstance(error, ValueError) else '자동 작성 중 연결 오류'

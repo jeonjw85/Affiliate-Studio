@@ -241,7 +241,7 @@ def _source_line(evidence, provider):
     return f'정보 출처: 사용자 제공 설명{when}'
 
 
-def render_article(article, products, *, settings):
+def render_article(article, products, *, settings, body_image=None):
     """Render protected disclosures, the exact affiliate links and any table."""
     from html import escape
     products = _as_products(products)
@@ -255,6 +255,12 @@ def render_article(article, products, *, settings):
     disclosures = [DISCLOSURES[provider] for provider in providers]
     sections = [f'<p class="disclosure">{escape(text)}</p>' for text in disclosures]
     sections.append(f'<h1>{escape(article["title"])}</h1>')
+    body_image_html = ''
+    if body_image:
+        body_image_html = ('<figure><img src="' + escape(body_image, quote=True)
+                           + '" alt="AI 생성 설명용 삽화" loading="lazy">'
+                           + '<figcaption>AI 생성 이미지 · 설명용 삽화</figcaption></figure>')
+        sections.append(body_image_html)
     sections.append(rendered['html'])
     if len(products) >= 2:
         table = comparison_rows(products)
@@ -281,4 +287,4 @@ def render_article(article, products, *, settings):
                         + [product['evidence'].get('name', '') for product in products]
                         + [_source_line(product['evidence'], product['provider']) for product in products]
                         + [product['affiliate_url'] for product in products])
-    return {'html': html, 'text': text}
+    return {'html': html, 'text': text, 'body_image_html': body_image_html}
