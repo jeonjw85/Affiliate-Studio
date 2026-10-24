@@ -50,6 +50,7 @@ sh start.sh
 
 - 첫 실행 시 가상환경과 의존성 설치를 위한 인터넷 연결 필요
 - AI와 WordPress 미연결 상태에서도 상품 등록, 템플릿, 검토, ZIP 사용 가능
+- Telegram·AI·이미지 생성은 각각 별도 설정이며, 이미지 설정을 비우면 대표 이미지만 사용
 - 직접 실행은 기본적으로 로컬 접속, NAS 운영은 아래 Docker 설정 사용
 - 로그인 기능이 없는 개인용 서비스로, 신뢰하는 개인 네트워크에서 운영
 - Mac Safari와 사용자 WordPress 사이트는 별도 검증 필요
@@ -355,6 +356,7 @@ IMAGE_BASE_URL=https://api.openai.com/v1
 IMAGE_MODEL=gpt-image-1
 IMAGE_API_KEY=
 IMAGE_DAILY_LIMIT=3
+IMAGE_TIMEOUT_SECONDS=120
 ```
 
 `IMAGE_MODE`를 비우면 AI 삽화 없이 상품 대표 이미지만 사용
@@ -364,7 +366,8 @@ IMAGE_DAILY_LIMIT=3
 
 이미지 저작권·사용 허용 여부와 개인정보 포함 여부는 앱이 보증하지 않음
 게시 전에 이미지 사용 권한과 내용을 직접 확인 필요
-자동 글은 1,200~2,000자까지 쓸 수 있어 로컬 AI는 `OLLAMA_CONTEXT_LENGTH=16384` 권장
+자동 글은 단일 상품 최대 2,000자, 비교·묶음 글 최대 3,000자 (짧은 글 700자)
+로컬 AI는 `OLLAMA_CONTEXT_LENGTH=16384` 권장
 자동 작성은 기존 수동 AI와 같은 `AI_DAILY_LIMIT`를 함께 사용하며, 한도가 없으면 링크는 대기 상태로 남음
 Docker는 `.env`의 `OLLAMA_CONTEXT_LENGTH` 값으로 조정, 메모리 여유 필요
 실제 계정 발행 전에는 테스트 WordPress에서 먼저 확인 필요
@@ -544,9 +547,10 @@ Affiliate Studio는 WordPress cron을 설치하거나 운영하지 않음
 ```sh
 .venv/bin/python -m pytest -q
 npm ci
-node --test tests/v02-actions.cjs tests/v02-dom.cjs tests/v03-metrics.cjs tests/ui-copy.cjs tests/affiliate-dom.cjs
+node --test tests/v02-actions.cjs tests/v02-dom.cjs tests/v03-metrics.cjs tests/ui-copy.cjs tests/affiliate-dom.cjs tests/automation-dom.cjs
 # Playwright 브라우저 설치 또는 CHROMIUM_PATH 지정 후 실행
 npm run test:e2e
+CHROMIUM_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node tests/e2e_automation.mjs
 node tests/e2e_v03.mjs
 node tests/e2e_v04.mjs
 node tests/e2e_copy.mjs
